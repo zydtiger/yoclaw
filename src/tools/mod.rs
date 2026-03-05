@@ -6,8 +6,7 @@ mod builtins;
 /// Represents a tool definition for use with the API.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Tool {
-    #[serde(rename = "type")]
-    kind: String,
+    r#type: String,
     function: FunctionTool,
 }
 
@@ -22,8 +21,7 @@ struct FunctionTool {
 /// Represents the parameters schema for a function tool.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Parameters {
-    #[serde(rename = "type")]
-    kind: String,
+    r#type: String,
     properties: Value,
 }
 
@@ -37,8 +35,7 @@ pub struct FunctionToolCall {
 /// Represents a tool call with its kind, id, and function call.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolCall {
-    #[serde(rename = "type")]
-    pub kind: String,
+    pub r#type: String,
     pub id: String,
     pub function: FunctionToolCall,
 }
@@ -55,12 +52,12 @@ impl ToolCall {
 /// Returns a list of all available tools.
 pub fn get_all_tools() -> Vec<Tool> {
     vec![Tool {
-        kind: "function".to_string(),
+        r#type: "function".to_string(),
         function: FunctionTool {
             name: "get_current_time".to_string(),
             description: "Returns the current date and time".to_string(),
             parameters: Parameters {
-                kind: "object".to_string(),
+                r#type: "object".to_string(),
                 properties: json!({}),
             },
         },

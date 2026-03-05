@@ -1,27 +1,8 @@
-use chrono::Local;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::env;
 
-/// Returns the current date and time as a formatted string.
-fn get_current_time() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-/// Defines the available tools.
-fn get_tools() -> Vec<Value> {
-    vec![json!({
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            "description": "Returns the current date and time",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
-    })]
-}
+mod tools;
 
 /// Call an OpenAI-compatible API with tool support.
 async fn call_model_with_tools(
@@ -54,29 +35,11 @@ async fn call_model_with_tools(
     Ok(result)
 }
 
-/// Execute a tool call and return the result.
-fn execute_tool(tool_call: &Value) -> String {
-    let function = tool_call.get("function");
-    let name = function
-        .and_then(|f| f.get("name"))
-        .and_then(|n| n.as_str())
-        .unwrap_or("");
-
-    // Note: If you expand this to handle arguments, you would parse them here:
-    // let args_str = function.and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}");
-    // let _args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
-
-    match name {
-        "get_current_time" => get_current_time(),
-        _ => format!("Error: Unknown tool '{}'", name),
-    }
-}
-
 /// Main function demonstrating tool integration with an OpenAI-compatible endpoint.
 #[tokio::main]
 async fn main() {
     let client = Client::new();
-    let tools = get_tools();
+    let tools = tools::get_all_tools();
     let mut messages = vec![json!({
         "role": "user",
         "content": "What time is it now?"
@@ -139,7 +102,7 @@ async fn main() {
                         let tool_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("");
 
                         println!("Calling tool: {}", tool_name);
-                        let tool_result = execute_tool(tool_call);
+                        let tool_result = tools::execute_tool(tool_call);
                         println!("Tool result: {}", tool_result);
                         println!();
 

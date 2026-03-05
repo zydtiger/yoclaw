@@ -2,12 +2,15 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use std::env;
 
+use crate::agent::{Message, Role};
+
+mod agent;
 mod tools;
 
 /// Call an OpenAI-compatible API with tool support.
 async fn call_model_with_tools(
     client: &Client,
-    messages: &[Value],
+    messages: &[Message],
     tools: &[tools::Tool],
 ) -> Result<Value, String> {
     let api_url = env::var("OPENAI_API_URL")
@@ -40,16 +43,10 @@ async fn call_model_with_tools(
 async fn main() {
     let client = Client::new();
     let tools = tools::get_all_tools();
-    let mut messages = vec![json!({
-        "role": "user",
-        "content": "What time is it now?"
-    })];
+    let mut messages = vec![Message::new(Role::User, "What time is it now?".to_string())];
 
     println!("=== Tool Integration Demo ===");
-    println!(
-        "Calling model with message: {}",
-        messages[0]["content"].as_str().unwrap()
-    );
+    println!("Calling model with message: {}", &messages[0].content);
     println!();
 
     println!("Step 1: Calling model...");
@@ -74,6 +71,8 @@ async fn main() {
         if !choices.is_empty() {
             let choice = &choices[0];
             let assistant_message = choice.get("message").cloned().unwrap_or(json!({}));
+            let assistant_message: Message = serde_json::from_value(assistant_message)
+                .expect("Failed to deserialize assistant message");
 
             println!(
                 "Model response: {}",
@@ -81,9 +80,7 @@ async fn main() {
             );
             println!();
 
-            let tool_calls = assistant_message
-                .get("tool_calls")
-                .and_then(|tc| tc.as_array());
+            let tool_calls = &assistant_message.tool_calls;
 
             if let Some(calls) = tool_calls {
                 if !calls.is_empty() {
@@ -93,23 +90,15 @@ async fn main() {
                     messages.push(assistant_message.clone());
 
                     for tool_call in calls {
-                        let tool_call: tools::ToolCall = serde_json::from_value(tool_call.clone())
-                            .expect("Failed to deserialize tool call");
-
-                        let tool_name = &tool_call.function.name;
-                        let tool_id = &tool_call.id;
-
-                        println!("Calling tool: {}", tool_name);
+                        println!("Calling tool: {}", &tool_call.function.name);
                         let tool_result = tool_call.execute();
                         println!("Tool result: {}", tool_result);
                         println!();
 
-                        messages.push(json!({
-                            "role": "tool",
-                            "content": tool_result,
-                            "name": tool_name,
-                            "tool_call_id": tool_id
-                        }));
+                        let message = Message::new(Role::Tool, tool_result)
+                            .with_name(tool_call.function.name.clone())
+                            .with_tool_call_id(tool_call.id.clone());
+                        messages.push(message);
                     }
 
                     println!("Step 3: Calling model with tool results...");
@@ -130,18 +119,10 @@ async fn main() {
                         }
                     }
                 } else {
-                    let content = assistant_message
-                        .get("content")
-                        .and_then(|c| c.as_str())
-                        .unwrap_or("");
-                    println!("Model response: {}", content);
+                    println!("Model response: {}", &assistant_message.content);
                 }
             } else {
-                let content = assistant_message
-                    .get("content")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("");
-                println!("Model response: {}", content);
+                println!("Model response: {}", &assistant_message.content);
             }
         }
     }

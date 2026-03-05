@@ -93,20 +93,17 @@ async fn main() {
                     messages.push(assistant_message.clone());
 
                     for tool_call in calls {
-                        let tool_name = tool_call
-                            .get("function")
-                            .and_then(|f| f.get("name"))
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("unknown");
+                        let tool_call: tools::ToolCall = serde_json::from_value(tool_call.clone())
+                            .expect("Failed to deserialize tool call");
 
-                        let tool_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("");
+                        let tool_name = &tool_call.function.name;
+                        let tool_id = &tool_call.id;
 
                         println!("Calling tool: {}", tool_name);
-                        let tool_result = tools::execute_tool(tool_call);
+                        let tool_result = tool_call.execute();
                         println!("Tool result: {}", tool_result);
                         println!();
 
-                        // Append the tool execution result
                         messages.push(json!({
                             "role": "tool",
                             "content": tool_result,

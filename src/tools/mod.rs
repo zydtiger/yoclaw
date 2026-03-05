@@ -27,7 +27,32 @@ struct Parameters {
     properties: Value,
 }
 
-/// Defines the available tools.
+/// Represents a function tool call with its name and arguments.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FunctionToolCall {
+    pub name: String,
+    pub arguments: Value,
+}
+
+/// Represents a tool call with its kind, id, and function call.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ToolCall {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub id: String,
+    pub function: FunctionToolCall,
+}
+
+impl ToolCall {
+    pub fn execute(&self) -> String {
+        match self.function.name.as_str() {
+            "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
+            _ => format!("Error: Unknown tool '{}'", self.function.name),
+        }
+    }
+}
+
+/// Returns a list of all available tools.
 pub fn get_all_tools() -> Vec<Tool> {
     vec![Tool {
         kind: "function".to_string(),
@@ -40,22 +65,4 @@ pub fn get_all_tools() -> Vec<Tool> {
             },
         },
     }]
-}
-
-/// Execute a tool call and return the result.
-pub fn execute_tool(tool_call: &Value) -> String {
-    let function = tool_call.get("function");
-    let name = function
-        .and_then(|f| f.get("name"))
-        .and_then(|n| n.as_str())
-        .unwrap_or("");
-
-    // TODO: If you expand this to handle arguments, you would parse them here:
-    // let args_str = function.and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}");
-    // let _args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
-
-    match name {
-        "get_current_time" => builtins::get_current_time(),
-        _ => format!("Error: Unknown tool '{}'", name),
-    }
 }

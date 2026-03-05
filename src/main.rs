@@ -8,7 +8,7 @@ mod tools;
 async fn call_model_with_tools(
     client: &Client,
     messages: &[Value],
-    tools: &[Value],
+    tools: &[tools::Tool],
 ) -> Result<Value, String> {
     let api_url = env::var("OPENAI_API_URL")
         .unwrap_or_else(|_| "http://localhost:11434/v1/chat/completions".to_string());

@@ -1,20 +1,45 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 mod builtins;
 
+/// Represents a tool definition for use with the API.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Tool {
+    #[serde(rename = "type")]
+    kind: String,
+    function: FunctionTool,
+}
+
+/// Represents a function tool with its name, description, and parameters.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct FunctionTool {
+    name: String,
+    description: String,
+    parameters: Parameters,
+}
+
+/// Represents the parameters schema for a function tool.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Parameters {
+    #[serde(rename = "type")]
+    kind: String,
+    properties: Value,
+}
+
 /// Defines the available tools.
-pub fn get_all_tools() -> Vec<Value> {
-    vec![json!({
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            "description": "Returns the current date and time",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
-    })]
+pub fn get_all_tools() -> Vec<Tool> {
+    vec![Tool {
+        kind: "function".to_string(),
+        function: FunctionTool {
+            name: "get_current_time".to_string(),
+            description: "Returns the current date and time".to_string(),
+            parameters: Parameters {
+                kind: "object".to_string(),
+                properties: json!({}),
+            },
+        },
+    }]
 }
 
 /// Execute a tool call and return the result.

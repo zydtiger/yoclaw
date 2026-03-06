@@ -68,3 +68,29 @@ pub async fn generic_shell(args: Value) -> String {
         )
     }
 }
+
+/// Reads file contents.
+/// Expects args to be { "path": string }
+pub async fn read_file(args: Value) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        // If it's a string, we MUST be able to decode it.
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        // If it's already an object, use it directly
+        args
+    };
+
+    let path = match args.pointer("/path").and_then(|v| v.as_str()) {
+        Some(cmd) => cmd.to_string(),
+        None => return "Error: 'path' field missing or not a string".to_string(),
+    };
+
+    // Read the file asynchronously using tokio
+    match tokio::fs::read_to_string(&path).await {
+        Ok(contents) => contents,
+        Err(e) => format!("Error reading file '{}': {}", path, e),
+    }
+}

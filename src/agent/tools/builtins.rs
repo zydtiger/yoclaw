@@ -236,3 +236,16 @@ pub async fn cancel_task(
         Err(e) => format!("Error canceling task: {}", e),
     }
 }
+
+/// Lists all currently scheduled and pending tasks.
+pub async fn list_tasks(
+    _args: Value,
+    task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+) -> String {
+    log::info!("Listing all pending tasks");
+    let tasks = task_manager.list_tasks().await;
+    match serde_json::to_string_pretty(&tasks) {
+        Ok(json_str) => json_str,
+        Err(e) => format!("Error serializing task list: {}", e),
+    }
+}

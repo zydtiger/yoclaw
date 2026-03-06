@@ -50,6 +50,7 @@ impl ToolCall {
             "generic_shell" => builtins::generic_shell(self.function.arguments.clone()).await,
             "read_file" => builtins::read_file(self.function.arguments.clone()).await,
             "write_file" => builtins::write_file(self.function.arguments.clone()).await,
+            "get_url" => builtins::get_url(self.function.arguments.clone()).await,
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }
     }
@@ -122,6 +123,23 @@ pub fn get_all_tools() -> Vec<Tool> {
                         }
                     }),
                     required: Some(vec!["path".to_string(), "content".to_string()]),
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "get_url".to_string(),
+                description: "Fetches content from a URL".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to fetch content from".to_string()
+                        }
+                    }),
+                    required: Some(vec!["url".to_string()]),
                 },
             },
         },

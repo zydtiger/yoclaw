@@ -128,3 +128,38 @@ pub async fn write_file(args: Value) -> String {
         Err(e) => format!("Error writing file '{}': {}", path, e),
     }
 }
+
+/// Fetches content from a URL and returns the response.
+/// Expects args to be { "url": string }
+pub async fn get_url(args: Value) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        // If it's a string, we MUST be able to decode it.
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        // If it's already an object, use it directly
+        args
+    };
+
+    let url = match args.pointer("/url").and_then(|v| v.as_str()) {
+        Some(u) => u.to_string(),
+        None => return "Error: 'url' field missing or not a string".to_string(),
+    };
+    log::info!("Fetching URL: {}", url);
+
+    // Fetch the URL using reqwest
+    match reqwest::get(&url).await {
+        Ok(response) => {
+            if !response.status().is_success() {
+                return format!("Error: Request failed with status code: {}", response.status());
+            }
+            match response.text().await {
+                Ok(body) => body,
+                Err(e) => format!("Error reading response body: {}", e),
+            }
+        }
+        Err(e) => format!("Error fetching URL '{}': {}", url, e),
+    }
+}

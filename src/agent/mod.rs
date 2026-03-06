@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::tools::{Tool, ToolCall};
 
 mod r#impl;
+mod tools;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Response {
@@ -91,6 +92,7 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Agent {
     pub api_url: Url,
     pub api_key: String,

@@ -1,8 +1,9 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 mod task_manager;
 
 pub use task_manager::create_task_channel;
+
+use chrono::{DateTime, Duration, Utc};
+use std::sync::atomic::{self, AtomicU64};
 
 /// Unique identifier for a task
 pub type TaskId = u64;
@@ -15,13 +16,79 @@ pub static TASK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub struct Task {
     pub id: TaskId,
     pub payload: String,
+    pub deadline: DateTime<Utc>,
 }
 
 impl Task {
-    /// Create a new task with the given payload.
-    /// The TaskId is automatically assigned.
+    /// Create a new task with the given payload (immediate execution)
     pub fn new(payload: String) -> Self {
-        let id = TASK_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
-        Self { id, payload }
+        let id = TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed);
+        Self {
+            id,
+            payload,
+            deadline: Utc::now(),
+        }
+    }
+
+    /// Create a scheduled task with a delay
+    pub fn scheduled(payload: String, delay: Duration) -> Self {
+        let id = TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed);
+        Self {
+            id,
+            payload,
+            deadline: Utc::now() + delay,
+        }
+    }
+
+    /// Check if the task is ready to execute
+    pub fn is_ready(&self) -> bool {
+        Utc::now() >= self.deadline
     }
 }
+
+// Equality: same ID means same task
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Task {}
+
+// Ordering: earlier deadline = higher priority (for min-heap)
+impl PartialOrd for Task {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Task {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reverse ordering: earlier deadline has HIGHER priority
+        other
+            .deadline
+            .cmp(&self.deadline)
+            // Tie-breaker: smaller ID (created earlier) has HIGHER priority
+            .then_with(|| other.id.cmp(&self.id))
+    }
+}
+
+/// Error type for task cancellation failures
+#[derive(Debug, Clone, PartialEq)]
+pub enum CancelError {
+    /// Task was already processed or not found
+    NotFound,
+    /// Task was already cancelled
+    AlreadyCancelled, // TODO: why would this exist?
+}
+
+impl std::fmt::Display for CancelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CancelError::NotFound => write!(f, "task not found"),
+            CancelError::AlreadyCancelled => write!(f, "task already cancelled"),
+        }
+    }
+}
+
+impl std::error::Error for CancelError {}

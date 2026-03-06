@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub openai_api_base_url: String,
     pub openai_api_key: String,
@@ -13,8 +13,14 @@ pub struct AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelsConfig {
+    pub telegram_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: AgentConfig,
+    pub channels: ChannelsConfig,
 }
 
 #[derive(Debug)]

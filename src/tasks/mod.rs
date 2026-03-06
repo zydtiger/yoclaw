@@ -4,12 +4,18 @@ pub use task_manager::create_task_channel;
 
 use chrono::{DateTime, Duration, Utc};
 use std::sync::atomic::{self, AtomicU64};
+use tokio::sync::oneshot;
 
 /// Unique identifier for a task
 pub type TaskId = u64;
 
 /// Static counter for generating unique TaskIds
 pub static TASK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+pub enum TaskCommand {
+    Schedule(Task),
+    Cancel(TaskId, oneshot::Sender<Result<(), CancelError>>),
+}
 
 /// A task to be processed by the agent
 #[derive(Debug, Clone)]
@@ -78,15 +84,12 @@ impl Ord for Task {
 pub enum CancelError {
     /// Task was already processed or not found
     NotFound,
-    /// Task was already cancelled
-    AlreadyCancelled, // TODO: why would this exist?
 }
 
 impl std::fmt::Display for CancelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CancelError::NotFound => write!(f, "task not found"),
-            CancelError::AlreadyCancelled => write!(f, "task already cancelled"),
         }
     }
 }

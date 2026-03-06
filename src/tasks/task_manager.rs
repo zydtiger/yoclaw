@@ -1,19 +1,19 @@
 use chrono::Duration;
 use chrono::Utc;
 use std::collections::BinaryHeap;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
 
-use crate::tasks::{CancelError, Task, TaskId};
+use crate::tasks::{CancelError, Task, TaskCommand, TaskId};
 
 /// TaskManager provides the interface for scheduling and cancelling tasks.
 /// It runs in a separate tokio::spawn and sends tasks to the main TaskProcessor.
 pub struct TaskManager {
-    tx: mpsc::Sender<Task>,
+    tx: mpsc::Sender<TaskCommand>,
 }
 
 impl TaskManager {
-    pub fn new(tx: mpsc::Sender<Task>) -> Self {
+    pub fn new(tx: mpsc::Sender<TaskCommand>) -> Self {
         Self { tx }
     }
 
@@ -21,10 +21,10 @@ impl TaskManager {
     pub async fn schedule_task(
         &self,
         payload: String,
-    ) -> Result<TaskId, mpsc::error::SendError<Task>> {
+    ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
         let task = Task::new(payload);
         let task_id = task.id;
-        self.tx.send(task).await?;
+        self.tx.send(TaskCommand::Schedule(task)).await?;
         Ok(task_id)
     }
 
@@ -33,28 +33,42 @@ impl TaskManager {
         &self,
         payload: String,
         delay: Duration,
-    ) -> Result<TaskId, mpsc::error::SendError<Task>> {
+    ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
         let task = Task::scheduled(payload, delay);
         let task_id = task.id;
-        self.tx.send(task).await?;
+        self.tx.send(TaskCommand::Schedule(task)).await?;
         Ok(task_id)
     }
 
     /// Cancel a pending task by its ID
-    pub async fn cancel_task(&self, _task_id: TaskId) -> Result<(), CancelError> {
-        // TODO: Implement cancellation logic for tasks in the priority queue
-        Ok(())
+    pub async fn cancel_task(&self, task_id: TaskId) -> Result<(), CancelError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .tx
+            .send(TaskCommand::Cancel(task_id, reply_tx))
+            .await
+            .is_err()
+        {
+            panic!(
+                "TaskProcessor channel is closed. Cannot cancel task {}",
+                task_id
+            );
+        }
+        match reply_rx.await {
+            Ok(result) => result,
+            Err(_) => Err(CancelError::NotFound),
+        }
     }
 }
 
 /// TaskProcessor handles the actual task queue and processing in the main loop.
 /// Uses a priority queue (BinaryHeap) to manage tasks by deadline.
 pub struct TaskProcessor {
-    rx: mpsc::Receiver<Task>,
+    rx: mpsc::Receiver<TaskCommand>,
 }
 
 impl TaskProcessor {
-    pub fn new(rx: mpsc::Receiver<Task>) -> Self {
+    pub fn new(rx: mpsc::Receiver<TaskCommand>) -> Self {
         Self { rx }
     }
 
@@ -82,10 +96,32 @@ impl TaskProcessor {
             };
 
             tokio::select! {
-                // Branch 1: New task arrives
-                Some(task) = self.rx.recv() => {
-                    log::info!("Task #{} scheduled for {:?}", task.id, task.deadline);
-                    task_queue.push(task);
+                // Branch 1: New task or cancellation arrives
+                Some(msg) = self.rx.recv() => {
+                    match msg {
+                        TaskCommand::Schedule(task) => {
+                            log::info!("Task #{} scheduled for {:?}", task.id, task.deadline);
+                            task_queue.push(task);
+                        }
+                        TaskCommand::Cancel(task_id, reply_tx) => {
+                            let mut found = false;
+                            let mut new_queue = BinaryHeap::new();
+                            for task in task_queue.drain() {
+                                if task.id == task_id {
+                                    found = true;
+                                } else {
+                                    new_queue.push(task);
+                                }
+                            }
+                            task_queue = new_queue;
+
+                            if found {
+                                let _ = reply_tx.send(Ok(()));
+                            } else {
+                                let _ = reply_tx.send(Err(CancelError::NotFound));
+                            }
+                        }
+                    }
                 },
 
                 // Branch 2: Timer fires (next deadline reached)
@@ -123,6 +159,6 @@ impl TaskProcessor {
 /// - TaskManager is used to schedule/cancel tasks (runs in spawn)
 /// - TaskProcessor processes tasks one at a time in main loop
 pub fn create_task_channel() -> (TaskManager, TaskProcessor) {
-    let (tx, rx) = mpsc::channel::<Task>(100);
+    let (tx, rx) = mpsc::channel::<TaskCommand>(100);
     (TaskManager::new(tx), TaskProcessor::new(rx))
 }

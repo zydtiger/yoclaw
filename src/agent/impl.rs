@@ -72,58 +72,46 @@ impl Agent {
     pub async fn send_message(&mut self, content: String) -> String {
         self.messages.push(Message::new(Role::User, content));
 
-        // 1. Initial LLM Call
-        log::info!("Initiating LLM call");
-        let response = match self.call().await {
-            Ok(res) => res,
-            Err(e) => return format!("Error: {e}"),
-        };
+        loop {
+            let response = match self.call().await {
+                Ok(res) => res,
+                Err(e) => return format!("Error: {e}"),
+            };
 
-        // NOTE: Only process first choice, assumed to be the only one
-        let choice = match response.choices.first() {
-            Some(c) => c,
-            None => return "Error: Response choices is empty".into(),
-        };
+            // NOTE: Only process first choice, assumed to be the only one
+            let choice = match response.choices.first() {
+                Some(c) => c,
+                None => return "Error: Response choices is empty".into(),
+            };
 
-        self.messages.push(choice.message.clone());
+            self.messages.push(choice.message.clone());
 
-        // 2. Branch: Tool Calls vs. Text
-        match &choice.finish_reason {
-            FinishReason::ToolCalls => {
-                let tool_calls = match &choice.message.tool_calls {
-                    Some(tc) if !tc.is_empty() => tc,
-                    _ => return "Error: Tool call expected but not found".into(),
-                };
+            match &choice.finish_reason {
+                FinishReason::ToolCalls => {
+                    let tool_calls = match &choice.message.tool_calls {
+                        Some(tc) if !tc.is_empty() => tc,
+                        _ => return "Error: Tool call expected but not found".into(),
+                    };
 
-                for tool_call in tool_calls {
-                    log::info!("Calling tool: {}", tool_call.function.name);
-                    let tool_result = tool_call.execute().await;
+                    for tool_call in tool_calls {
+                        log::info!("Calling tool: {}", tool_call.function.name);
+                        let tool_result = tool_call.execute().await;
 
-                    let message = Message::new(Role::Tool, tool_result)
-                        .with_name(tool_call.function.name.clone())
-                        .with_tool_call_id(tool_call.id.clone());
-                    self.messages.push(message);
+                        let message = Message::new(Role::Tool, tool_result)
+                            .with_name(tool_call.function.name.clone())
+                            .with_tool_call_id(tool_call.id.clone());
+                        self.messages.push(message);
+                    }
                 }
-
-                // 3. Final call after tool execution
-                log::info!("Call LLM after tool result");
-                match self.call().await {
-                    Ok(res) => res
-                        .choices
-                        .first()
-                        .and_then(|c| c.message.content.clone())
-                        .unwrap_or_else(|| "Error: Empty final response".into()),
-                    Err(e) => format!("Error: {e}"),
+                _ => {
+                    // Standard Text Response
+                    return choice
+                        .message
+                        .content
+                        .clone()
+                        .unwrap_or_else(|| "Error: Empty message".into());
                 }
-            }
-            _ => {
-                // Standard Text Response
-                choice
-                    .message
-                    .content
-                    .clone()
-                    .unwrap_or_else(|| "Error: Empty message".into())
-            }
+            };
         }
     }
 }

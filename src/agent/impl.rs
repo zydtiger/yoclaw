@@ -73,6 +73,7 @@ impl Agent {
         self.messages.push(Message::new(Role::User, content));
 
         // 1. Initial LLM Call
+        log::info!("Initiating LLM call");
         let response = match self.call().await {
             Ok(res) => res,
             Err(e) => return format!("Error: {e}"),
@@ -95,7 +96,7 @@ impl Agent {
                 };
 
                 for tool_call in tool_calls {
-                    println!("Calling tool: {}", tool_call.function.name);
+                    log::info!("Calling tool: {}", tool_call.function.name);
                     let tool_result = tool_call.execute().await;
 
                     let message = Message::new(Role::Tool, tool_result)
@@ -105,6 +106,7 @@ impl Agent {
                 }
 
                 // 3. Final call after tool execution
+                log::info!("Call LLM after tool result");
                 match self.call().await {
                     Ok(res) => res
                         .choices

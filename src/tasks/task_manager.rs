@@ -90,9 +90,17 @@ impl TaskProcessor {
     /// Run the task processor loop in the main process.
     /// Processes tasks one-by-one using the shared Agent (no cloning).
     /// Uses tokio::select! to handle both new arrivals and scheduled deadlines.
-    pub async fn run(mut self, agent: &mut crate::agent::Agent) {
-        let mut task_queue: BinaryHeap<Task> = BinaryHeap::new();
+    pub async fn run(mut self, mut agent: crate::agent::Agent) {
+        // Agent worker that works separately
+        let (exec_tx, mut exec_rx) = mpsc::channel::<Task>(32);
+        tokio::spawn(async move {
+            while let Some(task) = exec_rx.recv().await {
+                log::info!("Executing task {}", task.id);
+                agent.send_message(task.payload).await;
+            }
+        });
 
+        let mut task_queue: BinaryHeap<Task> = BinaryHeap::new();
         loop {
             // Calculate sleep duration to next deadline
             // (Tokio sleep requires a std::time::Duration)
@@ -150,9 +158,7 @@ impl TaskProcessor {
                     while let Some(task) = task_queue.peek() {
                         if task.is_ready() {
                             let task = task_queue.pop().unwrap();
-                            log::info!("Processing scheduled task #{}: {}", task.id, task.payload);
-                            let response = agent.send_message(task.payload).await;
-                            log::info!("Task #{} response: {}", task.id, response);
+                            exec_tx.send(task).await.expect("Agent worker coroutine died");
                         } else {
                             break; // Next task not ready yet
                         }
@@ -163,9 +169,7 @@ impl TaskProcessor {
                 else => {
                     // Process remaining tasks before exiting
                     while let Some(task) = task_queue.pop() {
-                        log::info!("Processing remaining task #{}: {}", task.id, task.payload);
-                        let response = agent.send_message(task.payload).await;
-                        log::info!("Task #{} response: {}", task.id, response);
+                       exec_tx.send(task).await.expect("Agent worker coroutine died");
                     }
                     break;
                 },

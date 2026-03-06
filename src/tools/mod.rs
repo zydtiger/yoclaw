@@ -23,6 +23,9 @@ struct FunctionTool {
 struct Parameters {
     r#type: String,
     properties: Value,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    required: Option<Vec<String>>,
 }
 
 /// Represents a function tool call with its name and arguments.
@@ -41,9 +44,10 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    pub fn execute(&self) -> String {
+    pub async fn execute(&self) -> String {
         match self.function.name.as_str() {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
+            "generic_shell" => builtins::generic_shell(self.function.arguments.clone()).await,
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }
     }
@@ -51,15 +55,35 @@ impl ToolCall {
 
 /// Returns a list of all available tools.
 pub fn get_all_tools() -> Vec<Tool> {
-    vec![Tool {
-        r#type: "function".to_string(),
-        function: FunctionTool {
-            name: "get_current_time".to_string(),
-            description: "Returns the current date and time".to_string(),
-            parameters: Parameters {
-                r#type: "object".to_string(),
-                properties: json!({}),
+    vec![
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "get_current_time".to_string(),
+                description: "Returns the current date and time".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({}),
+                    required: None,
+                },
             },
         },
-    }]
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "generic_shell".to_string(),
+                description: "Executes a shell command and returns the output".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute".to_string()
+                        }
+                    }),
+                    required: Some(vec!["command".to_string()]),
+                },
+            },
+        },
+    ]
 }

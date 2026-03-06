@@ -57,6 +57,9 @@ impl ToolCall {
             "schedule_task" => {
                 builtins::schedule_task(self.function.arguments.clone(), task_manager).await
             }
+            "cancel_task" => {
+                builtins::cancel_task(self.function.arguments.clone(), task_manager).await
+            }
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }
     }
@@ -167,6 +170,23 @@ pub fn get_all_tools() -> Vec<Tool> {
                         }
                     }),
                     required: Some(vec!["payload".to_string(), "delay_seconds".to_string()]),
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "cancel_task".to_string(),
+                description: "Cancels a pending scheduled task by its unique ID.".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "task_id": {
+                            "type": "number",
+                            "description": "The unique ID of the task to cancel".to_string()
+                        }
+                    }),
+                    required: Some(vec!["task_id".to_string()]),
                 },
             },
         },

@@ -198,7 +198,41 @@ pub async fn schedule_task(
         .schedule_task_in(payload, chrono::Duration::seconds(delay_seconds))
         .await
     {
-        Ok(task_id) => format!("Successfully scheduled task with ID: {}", task_id),
+        Ok(task_id) => {
+            log::info!("Successfully scheduled task #{}", task_id);
+            format!("Successfully scheduled task with ID: {}", task_id)
+        }
         Err(e) => format!("Error scheduling task: {}", e),
+    }
+}
+
+/// Cancels a pending task by its ID.
+/// Expects args to be { "task_id": number }
+pub async fn cancel_task(
+    args: Value,
+    task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        args
+    };
+
+    let task_id = match args.pointer("/task_id").and_then(|v| v.as_u64()) {
+        Some(id) => id,
+        None => return "Error: 'task_id' field missing or not a positive integer".to_string(),
+    };
+
+    log::info!("Canceling task #{}", task_id);
+
+    match task_manager.cancel_task(task_id).await {
+        Ok(_) => {
+            log::info!("Successfully canceled task #{}", task_id);
+            format!("Successfully canceled task ID: {}", task_id)
+        }
+        Err(e) => format!("Error canceling task: {}", e),
     }
 }

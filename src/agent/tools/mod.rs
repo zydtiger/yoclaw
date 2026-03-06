@@ -44,13 +44,19 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    pub async fn execute(&self) -> String {
+    pub async fn execute(
+        &self,
+        task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+    ) -> String {
         match self.function.name.as_str() {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
             "generic_shell" => builtins::generic_shell(self.function.arguments.clone()).await,
             "read_file" => builtins::read_file(self.function.arguments.clone()).await,
             "write_file" => builtins::write_file(self.function.arguments.clone()).await,
             "get_url" => builtins::get_url(self.function.arguments.clone()).await,
+            "schedule_task" => {
+                builtins::schedule_task(self.function.arguments.clone(), task_manager).await
+            }
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }
     }
@@ -140,6 +146,27 @@ pub fn get_all_tools() -> Vec<Tool> {
                         }
                     }),
                     required: Some(vec!["url".to_string()]),
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "schedule_task".to_string(),
+                description: "Schedules a message payload to be sent to the agent itself after a specified delay in seconds. Use this to remind yourself to do things in the future.".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "payload": {
+                            "type": "string",
+                            "description": "The message payload to send to the agent".to_string()
+                        },
+                        "delay_seconds": {
+                            "type": "number",
+                            "description": "The delay in seconds before the task is executed".to_string()
+                        }
+                    }),
+                    required: Some(vec!["payload".to_string(), "delay_seconds".to_string()]),
                 },
             },
         },

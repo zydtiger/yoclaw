@@ -153,7 +153,10 @@ pub async fn get_url(args: Value) -> String {
     match reqwest::get(&url).await {
         Ok(response) => {
             if !response.status().is_success() {
-                return format!("Error: Request failed with status code: {}", response.status());
+                return format!(
+                    "Error: Request failed with status code: {}",
+                    response.status()
+                );
             }
             match response.text().await {
                 Ok(body) => body,
@@ -161,5 +164,41 @@ pub async fn get_url(args: Value) -> String {
             }
         }
         Err(e) => format!("Error fetching URL '{}': {}", url, e),
+    }
+}
+
+/// Schedules a new task to be executed after a delay.
+/// Expects args to be { "payload": string, "delay_seconds": number }
+pub async fn schedule_task(
+    args: Value,
+    task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        args
+    };
+
+    let payload = match args.pointer("/payload").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => return "Error: 'payload' field missing or not a string".to_string(),
+    };
+
+    let delay_seconds = match args.pointer("/delay_seconds").and_then(|v| v.as_f64()) {
+        Some(d) => d as i64,
+        None => return "Error: 'delay_seconds' field missing or not a number".to_string(),
+    };
+
+    log::info!("Scheduling task in {}s: {}", delay_seconds, payload);
+
+    match task_manager
+        .schedule_task_in(payload, chrono::Duration::seconds(delay_seconds))
+        .await
+    {
+        Ok(task_id) => format!("Successfully scheduled task with ID: {}", task_id),
+        Err(e) => format!("Error scheduling task: {}", e),
     }
 }

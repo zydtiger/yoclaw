@@ -8,6 +8,7 @@ use crate::tasks::{CancelError, Task, TaskCommand, TaskId};
 
 /// TaskManager provides the interface for scheduling and cancelling tasks.
 /// It runs in a separate tokio::spawn and sends tasks to the main TaskProcessor.
+#[derive(Debug)]
 pub struct TaskManager {
     tx: mpsc::Sender<TaskCommand>,
 }

@@ -1,6 +1,4 @@
-mod task_manager;
-
-pub use task_manager::create_task_channel;
+pub mod task_manager;
 
 use chrono::{DateTime, Duration, Utc};
 use std::sync::atomic::{self, AtomicU64};

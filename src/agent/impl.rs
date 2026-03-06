@@ -32,6 +32,7 @@ impl Agent {
         api_key: &str,
         model: &str,
         system_prompt: &str,
+        task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
     ) -> Result<Self, reqwest::Error> {
         let parsed_url = match api_url.into_url() {
             Ok(url) => url,
@@ -49,6 +50,7 @@ impl Agent {
             tools: tools::get_all_tools(),
             client: Client::new(),
             messages: vec![Message::new(Role::System, system_prompt.to_string())],
+            task_manager,
         })
     }
 
@@ -107,7 +109,7 @@ impl Agent {
 
                     for tool_call in tool_calls {
                         log::info!("Calling tool: {}", tool_call.function.name);
-                        let tool_result = tool_call.execute().await;
+                        let tool_result = tool_call.execute(self.task_manager.clone()).await;
 
                         let message = Message::new(Role::Tool, tool_result)
                             .with_name(tool_call.function.name.clone())

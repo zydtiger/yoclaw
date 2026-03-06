@@ -94,3 +94,34 @@ pub async fn read_file(args: Value) -> String {
         Err(e) => format!("Error reading file '{}': {}", path, e),
     }
 }
+
+/// Writes content to a file.
+/// Expects args to be { "path": string, "content": string }
+pub async fn write_file(args: Value) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        // If it's a string, we MUST be able to decode it.
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        // If it's already an object, use it directly
+        args
+    };
+
+    let path = match args.pointer("/path").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => return "Error: 'path' field missing or not a string".to_string(),
+    };
+
+    let content = match args.pointer("/content").and_then(|v| v.as_str()) {
+        Some(c) => c.to_string(),
+        None => return "Error: 'content' field missing or not a string".to_string(),
+    };
+
+    // Write the file asynchronously using tokio
+    match tokio::fs::write(&path, &content).await {
+        Ok(_) => format!("Successfully wrote {} bytes to '{}'", content.len(), path),
+        Err(e) => format!("Error writing file '{}': {}", path, e),
+    }
+}

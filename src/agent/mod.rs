@@ -1,10 +1,10 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
-use crate::tools::{Tool, ToolCall};
-
 mod r#impl;
 mod tools;
+
+use tools::{Tool, ToolCall};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Response {

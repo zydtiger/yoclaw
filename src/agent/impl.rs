@@ -1,4 +1,4 @@
-use reqwest::{Client, Url};
+use reqwest::{Client, IntoUrl};
 use serde_json::{json, Value};
 
 use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
@@ -27,16 +27,29 @@ impl Message {
 }
 
 impl Agent {
-    pub fn new(api_url: Url, api_key: String, model: String, system_prompt: String) -> Self {
-        Self {
-            api_url,
-            api_key,
-            model,
+    pub fn new(
+        api_url: impl IntoUrl,
+        api_key: &str,
+        model: &str,
+        system_prompt: &str,
+    ) -> Result<Self, reqwest::Error> {
+        let parsed_url = match api_url.into_url() {
+            Ok(url) => url,
+            Err(e) => {
+                log::error!("Failed to parse API URL: {}", e);
+                return Err(e);
+            }
+        };
+
+        Ok(Self {
+            api_url: parsed_url,
+            api_key: api_key.to_string(),
+            model: model.to_string(),
 
             tools: tools::get_all_tools(),
             client: Client::new(),
-            messages: vec![Message::new(Role::System, system_prompt)],
-        }
+            messages: vec![Message::new(Role::System, system_prompt.to_string())],
+        })
     }
 
     /// Call an OpenAI-compatible API with tool support.

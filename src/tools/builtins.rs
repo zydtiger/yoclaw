@@ -24,6 +24,7 @@ pub async fn generic_shell(args: Value) -> String {
         Some(cmd) => cmd.to_string(),
         None => return "Error: 'command' field missing or not a string".to_string(),
     };
+    log::info!("Executing command: {}", command);
 
     // Split the command into program and arguments
     let parts: Vec<&str> = command.split_whitespace().collect();
@@ -87,6 +88,7 @@ pub async fn read_file(args: Value) -> String {
         Some(cmd) => cmd.to_string(),
         None => return "Error: 'path' field missing or not a string".to_string(),
     };
+    log::info!("Reading file: {}", path);
 
     // Read the file asynchronously using tokio
     match tokio::fs::read_to_string(&path).await {
@@ -113,6 +115,7 @@ pub async fn write_file(args: Value) -> String {
         Some(p) => p.to_string(),
         None => return "Error: 'path' field missing or not a string".to_string(),
     };
+    log::info!("Writing file: {}", path);
 
     let content = match args.pointer("/content").and_then(|v| v.as_str()) {
         Some(c) => c.to_string(),

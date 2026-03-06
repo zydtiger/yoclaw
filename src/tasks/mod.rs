@@ -1,6 +1,7 @@
 pub mod task_manager;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Local, Utc};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::sync::atomic::{self, AtomicU64};
 use tokio::sync::oneshot;
 
@@ -22,6 +23,23 @@ pub struct Task {
     pub id: TaskId,
     pub payload: String,
     pub deadline: DateTime<Utc>,
+}
+
+impl Serialize for Task {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Task", 3)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("payload", &self.payload)?;
+
+        // Convert Utc to Local time for serialization
+        let local_deadline = self.deadline.with_timezone(&Local);
+        state.serialize_field("deadline", &local_deadline.to_rfc3339())?;
+
+        state.end()
+    }
 }
 
 impl Task {

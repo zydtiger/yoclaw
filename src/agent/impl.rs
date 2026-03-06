@@ -1,7 +1,7 @@
 use reqwest::{Client, Url};
 use serde_json::{json, Value};
 
-use crate::agent::{Agent, FinishReason, Message, Response, Role, Tool};
+use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
 
 impl Message {
     pub fn new(role: Role, content: String) -> Self {
@@ -27,13 +27,13 @@ impl Message {
 }
 
 impl Agent {
-    pub fn new(api_url: Url, api_key: String, model: String, tools: Vec<Tool>) -> Self {
+    pub fn new(api_url: Url, api_key: String, model: String) -> Self {
         Self {
             api_url,
             api_key,
             model,
-            tools,
 
+            tools: tools::get_all_tools(),
             client: Client::new(),
             messages: vec![],
         }

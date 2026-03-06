@@ -97,9 +97,9 @@ pub struct Agent {
     pub api_url: Url,
     pub api_key: String,
     pub model: String,
-    pub tools: Vec<Tool>,
 
     /// Self managed
+    pub tools: Vec<Tool>,
     pub client: Client,
     pub messages: Vec<Message>,
 }

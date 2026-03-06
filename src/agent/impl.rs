@@ -27,7 +27,7 @@ impl Message {
 }
 
 impl Agent {
-    pub fn new(api_url: Url, api_key: String, model: String) -> Self {
+    pub fn new(api_url: Url, api_key: String, model: String, system_prompt: String) -> Self {
         Self {
             api_url,
             api_key,
@@ -35,7 +35,7 @@ impl Agent {
 
             tools: tools::get_all_tools(),
             client: Client::new(),
-            messages: vec![],
+            messages: vec![Message::new(Role::System, system_prompt)],
         }
     }
 

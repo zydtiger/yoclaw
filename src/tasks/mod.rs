@@ -13,6 +13,7 @@ pub static TASK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub enum TaskCommand {
     Schedule(Task),
     Cancel(TaskId, oneshot::Sender<Result<(), CancelError>>),
+    ListTasks(oneshot::Sender<Vec<Task>>),
 }
 
 /// A task to be processed by the agent

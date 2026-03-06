@@ -60,6 +60,20 @@ impl TaskManager {
             Err(_) => Err(CancelError::NotFound),
         }
     }
+
+    /// List all current pending tasks, their ids, payloads, and deadlines
+    pub async fn list_tasks(&self) -> Vec<Task> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .tx
+            .send(TaskCommand::ListTasks(reply_tx))
+            .await
+            .is_err()
+        {
+            return Vec::new(); // channel closed
+        }
+        reply_rx.await.unwrap_or_default()
+    }
 }
 
 /// TaskProcessor handles the actual task queue and processing in the main loop.
@@ -121,6 +135,11 @@ impl TaskProcessor {
                             } else {
                                 let _ = reply_tx.send(Err(CancelError::NotFound));
                             }
+                        }
+                        TaskCommand::ListTasks(reply_tx) => {
+                            let mut tasks: Vec<_> = task_queue.iter().cloned().collect();
+                            tasks.sort();
+                            let _ = reply_tx.send(tasks);
                         }
                     }
                 },

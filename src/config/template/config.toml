@@ -1,0 +1,4 @@
+[agent]
+openai_api_base_url = 'http://localhost:11434/v1'
+openai_api_key = 'ollama'
+openai_model = 'qwen3-4b'

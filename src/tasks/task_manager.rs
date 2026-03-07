@@ -1,10 +1,13 @@
 use chrono::Duration;
 use chrono::Utc;
 use std::collections::BinaryHeap;
+use std::path::PathBuf;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
 
-use crate::tasks::{CancelError, Task, TaskCommand, TaskId};
+use super::{CancelError, Task, TaskCommand, TaskId, TaskSaveError};
 
 /// TaskManager provides the interface for scheduling and cancelling tasks.
 /// It runs in a separate tokio::spawn and sends tasks to the main TaskProcessor.
@@ -80,11 +83,37 @@ impl TaskManager {
 /// Uses a priority queue (BinaryHeap) to manage tasks by deadline.
 pub struct TaskProcessor {
     task_rx: mpsc::Receiver<TaskCommand>,
+    pending_tasks: BinaryHeap<Task>,
 }
 
 impl TaskProcessor {
-    pub fn new(rx: mpsc::Receiver<TaskCommand>) -> Self {
-        Self { task_rx: rx }
+    /// Create a new TaskProcessor, loading any persisted tasks from tasks.json
+    pub async fn new(rx: mpsc::Receiver<TaskCommand>) -> Self {
+        let mut pending_tasks = BinaryHeap::new();
+
+        // Load persisted tasks from tasks.json
+        match Self::load_tasks().await {
+            Ok(tasks) => {
+                if !tasks.is_empty() {
+                    log::info!(
+                        "TaskProcessor: Loaded {} persisted task(s) from tasks.json",
+                        tasks.len()
+                    );
+                    // Add loaded tasks to the pending queue
+                    for task in tasks {
+                        pending_tasks.push(task);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("TaskProcessor: Failed to load persisted tasks: {}", e);
+            }
+        }
+
+        Self {
+            task_rx: rx,
+            pending_tasks,
+        }
     }
 
     /// Run the task processor loop in the main process.
@@ -117,11 +146,10 @@ impl TaskProcessor {
             }
         });
 
-        let mut task_queue: BinaryHeap<Task> = BinaryHeap::new();
         loop {
             // Calculate sleep duration to next deadline
             // (Tokio sleep requires a std::time::Duration)
-            let sleep_duration = match task_queue.peek() {
+            let sleep_duration = match self.pending_tasks.peek() {
                 Some(task) => {
                     let now = Utc::now();
                     if task.deadline <= now {
@@ -141,19 +169,19 @@ impl TaskProcessor {
                     match msg {
                         TaskCommand::Schedule(task) => {
                             log::info!("Task #{} scheduled for {:?}", task.id, task.deadline);
-                            task_queue.push(task);
+                            self.pending_tasks.push(task);
                         }
                         TaskCommand::Cancel(task_id, reply_tx) => {
                             let mut found = false;
                             let mut new_queue = BinaryHeap::new();
-                            for task in task_queue.drain() {
+                            for task in self.pending_tasks.drain() {
                                 if task.id == task_id {
                                     found = true;
                                 } else {
                                     new_queue.push(task);
                                 }
                             }
-                            task_queue = new_queue;
+                            self.pending_tasks = new_queue;
 
                             if found {
                                 reply_tx.send(Ok(())).unwrap();
@@ -162,7 +190,7 @@ impl TaskProcessor {
                             }
                         }
                         TaskCommand::ListTasks(reply_tx) => {
-                            let mut tasks: Vec<_> = task_queue.iter().cloned().collect();
+                            let mut tasks: Vec<_> = self.pending_tasks.iter().cloned().collect();
                             tasks.sort();
                             reply_tx.send(tasks).unwrap();
                         }
@@ -172,9 +200,9 @@ impl TaskProcessor {
                 // Branch 2: Timer fires (next deadline reached)
                 _ = sleep(sleep_duration) => {
                     // Process all ready tasks
-                    while let Some(task) = task_queue.peek() {
+                    while let Some(task) = self.pending_tasks.peek() {
                         if task.is_ready() {
-                            let task = task_queue.pop().unwrap();
+                            let task = self.pending_tasks.pop().unwrap();
                             agent_tx.send(task).await.expect("Agent worker coroutine died");
                         } else {
                             break; // Next task not ready yet
@@ -182,16 +210,70 @@ impl TaskProcessor {
                     }
                 },
 
-                // Branch 3: Channel closed
+                // Branch 3: Channel closed (graceful shutdown)
                 else => {
-                    // Process remaining tasks before exiting
-                    while let Some(task) = task_queue.pop() {
-                       agent_tx.send(task).await.expect("Agent worker coroutine died");
+                    log::info!("TaskProcessor shutting down, saving {} pending task(s)", self.pending_tasks.len());
+                    // Save pending tasks before exiting
+                    let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
+                    if let Err(e) = Self::save_tasks(&pending).await {
+                        log::error!("Failed to save pending tasks: {}", e);
+                    } else {
+                        log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
                     }
                     break;
                 },
             }
         }
+    }
+
+    /// Get the path to the tasks.json file used for persisting tasks.
+    ///
+    /// This file is stored in the CONFIG_DIR and contains all pending tasks
+    /// that need to be loaded on application restart.
+    pub fn get_tasks_path() -> PathBuf {
+        PathBuf::from(&*crate::globals::CONFIG_DIR).join("tasks.json")
+    }
+
+    /// Save tasks to a JSON file
+    pub async fn save_tasks(tasks: &[Task]) -> Result<(), TaskSaveError> {
+        let json =
+            serde_json::to_string_pretty(tasks).map_err(|e| TaskSaveError::InvalidFormat(e))?;
+
+        let file_path = Self::get_tasks_path();
+        let mut file = File::create(file_path)
+            .await
+            .map_err(|e| TaskSaveError::FsError(e))?;
+
+        file.write_all(json.as_bytes())
+            .await
+            .map_err(|e| TaskSaveError::FsError(e))?;
+
+        Ok(())
+    }
+
+    /// Load tasks from a JSON file
+    pub async fn load_tasks() -> Result<Vec<Task>, TaskSaveError> {
+        let file_path = Self::get_tasks_path();
+
+        if !file_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = tokio::fs::read_to_string(file_path)
+            .await
+            .map_err(|e| TaskSaveError::FsError(e))?;
+
+        let mut tasks: Vec<Task> =
+            serde_json::from_str(&content).map_err(|e| TaskSaveError::InvalidFormat(e))?;
+
+        // Reset ids for tasks
+        tasks.iter_mut().enumerate().for_each(|(i, task)| {
+            task.id = i as u64;
+        });
+
+        super::TASK_ID_COUNTER.store(tasks.len() as u64, std::sync::atomic::Ordering::Relaxed);
+
+        Ok(tasks)
     }
 }
 
@@ -199,7 +281,9 @@ impl TaskProcessor {
 /// Returns (TaskManager, TaskProcessor) where:
 /// - TaskManager is used to schedule/cancel tasks (runs in spawn)
 /// - TaskProcessor processes tasks one at a time in main loop
-pub fn create_task_channel() -> (TaskManager, TaskProcessor) {
+///
+/// Note: TaskProcessor::new is async because it loads persisted tasks from disk
+pub async fn create_task_channel() -> (TaskManager, TaskProcessor) {
     let (tx, rx) = mpsc::channel::<TaskCommand>(100);
-    (TaskManager::new(tx), TaskProcessor::new(rx))
+    (TaskManager::new(tx), TaskProcessor::new(rx).await)
 }

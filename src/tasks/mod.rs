@@ -105,3 +105,30 @@ impl std::fmt::Display for CancelError {
 }
 
 impl std::error::Error for CancelError {}
+
+/// Error type for task persistence (save/load) failures
+#[derive(Debug)]
+pub enum TaskSaveError {
+    /// Failed to serialize/deserialize JSON
+    InvalidFormat(serde_json::Error),
+    /// File system error (read/write)
+    FsError(std::io::Error),
+}
+
+impl std::fmt::Display for TaskSaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskSaveError::InvalidFormat(e) => write!(f, "Invalid task format: {}", e),
+            TaskSaveError::FsError(e) => write!(f, "File system error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for TaskSaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            TaskSaveError::InvalidFormat(e) => Some(e),
+            TaskSaveError::FsError(e) => Some(e),
+        }
+    }
+}

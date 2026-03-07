@@ -10,12 +10,12 @@ use crate::tasks::{CancelError, Task, TaskCommand, TaskId};
 /// It runs in a separate tokio::spawn and sends tasks to the main TaskProcessor.
 #[derive(Debug)]
 pub struct TaskManager {
-    tx: mpsc::Sender<TaskCommand>,
+    task_tx: mpsc::Sender<TaskCommand>,
 }
 
 impl TaskManager {
     pub fn new(tx: mpsc::Sender<TaskCommand>) -> Self {
-        Self { tx }
+        Self { task_tx: tx }
     }
 
     /// Schedule a task to run immediately
@@ -25,7 +25,7 @@ impl TaskManager {
     ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
         let task = Task::new(payload);
         let task_id = task.id;
-        self.tx.send(TaskCommand::Schedule(task)).await?;
+        self.task_tx.send(TaskCommand::Schedule(task)).await?;
         Ok(task_id)
     }
 
@@ -37,7 +37,7 @@ impl TaskManager {
     ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
         let task = Task::scheduled(payload, delay);
         let task_id = task.id;
-        self.tx.send(TaskCommand::Schedule(task)).await?;
+        self.task_tx.send(TaskCommand::Schedule(task)).await?;
         Ok(task_id)
     }
 
@@ -45,7 +45,7 @@ impl TaskManager {
     pub async fn cancel_task(&self, task_id: TaskId) -> Result<(), CancelError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         if self
-            .tx
+            .task_tx
             .send(TaskCommand::Cancel(task_id, reply_tx))
             .await
             .is_err()
@@ -65,7 +65,7 @@ impl TaskManager {
     pub async fn list_tasks(&self) -> Vec<Task> {
         let (reply_tx, reply_rx) = oneshot::channel();
         if self
-            .tx
+            .task_tx
             .send(TaskCommand::ListTasks(reply_tx))
             .await
             .is_err()
@@ -79,38 +79,41 @@ impl TaskManager {
 /// TaskProcessor handles the actual task queue and processing in the main loop.
 /// Uses a priority queue (BinaryHeap) to manage tasks by deadline.
 pub struct TaskProcessor {
-    rx: mpsc::Receiver<TaskCommand>,
+    task_rx: mpsc::Receiver<TaskCommand>,
 }
 
 impl TaskProcessor {
     pub fn new(rx: mpsc::Receiver<TaskCommand>) -> Self {
-        Self { rx }
+        Self { task_rx: rx }
     }
 
     /// Run the task processor loop in the main process.
-    /// 
+    ///
     /// IMPORTANT: Agent MUST run in a SEPARATE coroutine (tokio::spawn) to avoid deadlock.
-    /// 
+    ///
     /// When Agent executes tools like schedule_task, cancel_task, or list_tasks, it calls
     /// back to TaskManager which sends messages through this TaskProcessor's channel.
-    /// 
+    ///
     /// If Agent were on the same thread as TaskProcessor:
     /// 1. TaskProcessor sends task → Agent starts executing
     /// 2. Agent uses schedule_task tool → sends to TaskProcessor
     /// 3. TaskProcessor is BLOCKED waiting for Agent to finish
     /// 4. Agent is BLOCKED waiting for TaskProcessor to schedule new task
     /// 5. DEADLOCK!
-    /// 
+    ///
     /// By running Agent in a separate coroutine, both can proceed concurrently.
-    pub async fn run(mut self, mut agent: crate::agent::Agent, tx: mpsc::Sender<String>) {
+    pub async fn run(mut self, mut agent: crate::agent::Agent, channel_tx: mpsc::Sender<String>) {
         // Agent worker in SEPARATE coroutine - avoids deadlock when Agent uses tools
         // that call back to TaskManager (schedule_task, cancel_task, list_tasks)
-        let (exec_tx, mut exec_rx) = mpsc::channel::<Task>(32);
+        let (agent_tx, mut agent_rx) = mpsc::channel::<Task>(32);
         tokio::spawn(async move {
-            while let Some(task) = exec_rx.recv().await {
+            while let Some(task) = agent_rx.recv().await {
                 log::info!("Executing task {}", task.id);
                 let response = agent.send_message(task.payload).await;
-                tx.send(response).await.expect("Failed to send to channel");
+                channel_tx
+                    .send(response)
+                    .await
+                    .expect("Failed to send to channel");
             }
         });
 
@@ -134,7 +137,7 @@ impl TaskProcessor {
 
             tokio::select! {
                 // Branch 1: New task or cancellation arrives
-                Some(msg) = self.rx.recv() => {
+                Some(msg) = self.task_rx.recv() => {
                     match msg {
                         TaskCommand::Schedule(task) => {
                             log::info!("Task #{} scheduled for {:?}", task.id, task.deadline);
@@ -172,7 +175,7 @@ impl TaskProcessor {
                     while let Some(task) = task_queue.peek() {
                         if task.is_ready() {
                             let task = task_queue.pop().unwrap();
-                            exec_tx.send(task).await.expect("Agent worker coroutine died");
+                            agent_tx.send(task).await.expect("Agent worker coroutine died");
                         } else {
                             break; // Next task not ready yet
                         }
@@ -183,7 +186,7 @@ impl TaskProcessor {
                 else => {
                     // Process remaining tasks before exiting
                     while let Some(task) = task_queue.pop() {
-                       exec_tx.send(task).await.expect("Agent worker coroutine died");
+                       agent_tx.send(task).await.expect("Agent worker coroutine died");
                     }
                     break;
                 },

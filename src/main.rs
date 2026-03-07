@@ -33,14 +33,14 @@ async fn main() {
         Agent::new(&config.agent, task_manager.clone()).expect("Failed to initialize Agent");
 
     // Spawn unified Telegram coroutine - handles both polling and sending
-    let (tx, mut rx) = mpsc::channel::<String>(16);
+    let (channel_tx, mut channel_rx) = mpsc::channel::<String>(16);
     tokio::spawn(async move {
         let chat_id = "7235677031"; // TODO: hard-code chat_id for now
 
         loop {
             tokio::select! {
                 // Branch 1: Send outgoing messages
-                Some(msg) = rx.recv() => {
+                Some(msg) = channel_rx.recv() => {
                     if let Err(e) = channel.send_message(chat_id, &msg).await {
                         log::error!("Failed to send message to Telegram: {}", e);
                     }
@@ -81,5 +81,5 @@ async fn main() {
     // Main loop: TaskProcessor runs in main process with Agent
     // This processes tasks one-by-one, preserving chat history across all tasks
     log::info!("TaskProcessor started - waiting for tasks...");
-    task_processor.run(agent, tx).await;
+    task_processor.run(agent, channel_tx).await;
 }

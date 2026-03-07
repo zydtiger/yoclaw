@@ -1,4 +1,4 @@
-use reqwest::{Client, IntoUrl};
+use reqwest::Client;
 use serde_json::{json, Value};
 
 use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
@@ -28,19 +28,20 @@ impl Message {
 
 impl Agent {
     pub fn new(
-        api_url: impl IntoUrl,
+        api_url: &str,
         api_key: &str,
         model: &str,
         system_prompt: &str,
         task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
-    ) -> Result<Self, reqwest::Error> {
-        let parsed_url = match api_url.into_url() {
-            Ok(url) => url.join("chat/completions"),
+    ) -> Result<Self, url::ParseError> {
+        let parsed_url = match url::Url::parse(api_url) {
+            Ok(url) => url,
             Err(e) => {
                 log::error!("Failed to parse API URL: {}", e);
                 return Err(e);
             }
         };
+        let parsed_url = parsed_url.join("chat/completions")?;
 
         Ok(Self {
             api_url: parsed_url,

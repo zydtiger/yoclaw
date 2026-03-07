@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::{Channel, ChannelMessage};
 
 const TELEGRAM_API_URL: &str = "https://api.telegram.org";
+const MAX_MESSAGE_LEN: usize = 4_096; // Telegram's message length limit
 
 #[derive(Debug, Deserialize)]
 struct TelegramResponse<T> {
@@ -60,10 +61,41 @@ impl Channel for TelegramChannel {
         content: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = self.api_url("sendMessage");
+
+        // Convert standard Markdown to Telegram's MarkdownV2 dialect
+        let mut use_markdown = true;
+        let md_v2_content = telegram_markdown_v2::convert_with_strategy(
+            content,
+            telegram_markdown_v2::UnsupportedTagsStrategy::Escape,
+        )
+        .unwrap_or_else(|e| {
+            // Log issue and fallback to string (will likely get rejected by TG API if it has bad unescaped chars, but we avoid a full panic)
+            log::error!(
+                "Failed to convert markdown to MarkdownV2: {}. Using raw content.",
+                e
+            );
+            use_markdown = false;
+            content.to_string()
+        });
+
+        // Ensure message doesn't exceed Telegram's MAX_MESSAGE_LEN limit
+        let truncated_content = if md_v2_content.len() > MAX_MESSAGE_LEN {
+            log::warn!(
+                "Message exceeds MAX_MESSAGE_LEN ({} > {}). Truncating to {} bytes.",
+                md_v2_content.len(),
+                MAX_MESSAGE_LEN,
+                MAX_MESSAGE_LEN
+            );
+            let warning_msg = "\n...TOO LONG FOR TELEGRAM";
+            md_v2_content[..MAX_MESSAGE_LEN - warning_msg.len()].to_string() + warning_msg
+        } else {
+            md_v2_content
+        };
+
         let req_body = serde_json::json!({
             "chat_id": recipient_id,
-            "text": content,
-            "parse_mode": "MarkdownV2",
+            "text": truncated_content,
+            "parse_mode": if use_markdown {"MarkdownV2"} else {"plain_text"},
         });
 
         let response = self

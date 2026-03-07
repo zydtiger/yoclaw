@@ -88,15 +88,29 @@ impl TaskProcessor {
     }
 
     /// Run the task processor loop in the main process.
-    /// Processes tasks one-by-one using the shared Agent (no cloning).
-    /// Uses tokio::select! to handle both new arrivals and scheduled deadlines.
-    pub async fn run(mut self, mut agent: crate::agent::Agent) {
-        // Agent worker that works separately
+    /// 
+    /// IMPORTANT: Agent MUST run in a SEPARATE coroutine (tokio::spawn) to avoid deadlock.
+    /// 
+    /// When Agent executes tools like schedule_task, cancel_task, or list_tasks, it calls
+    /// back to TaskManager which sends messages through this TaskProcessor's channel.
+    /// 
+    /// If Agent were on the same thread as TaskProcessor:
+    /// 1. TaskProcessor sends task → Agent starts executing
+    /// 2. Agent uses schedule_task tool → sends to TaskProcessor
+    /// 3. TaskProcessor is BLOCKED waiting for Agent to finish
+    /// 4. Agent is BLOCKED waiting for TaskProcessor to schedule new task
+    /// 5. DEADLOCK!
+    /// 
+    /// By running Agent in a separate coroutine, both can proceed concurrently.
+    pub async fn run(mut self, mut agent: crate::agent::Agent, tx: mpsc::Sender<String>) {
+        // Agent worker in SEPARATE coroutine - avoids deadlock when Agent uses tools
+        // that call back to TaskManager (schedule_task, cancel_task, list_tasks)
         let (exec_tx, mut exec_rx) = mpsc::channel::<Task>(32);
         tokio::spawn(async move {
             while let Some(task) = exec_rx.recv().await {
                 log::info!("Executing task {}", task.id);
-                agent.send_message(task.payload).await;
+                let response = agent.send_message(task.payload).await;
+                tx.send(response).await.expect("Failed to send to channel");
             }
         });
 

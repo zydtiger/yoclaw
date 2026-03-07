@@ -1,4 +1,3 @@
-use std::env;
 use std::fmt;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
@@ -17,8 +16,7 @@ impl fmt::Display for ConfigError {
 impl Config {
     /// Get the config file path from CONFIG_PATH environment variable
     fn get_config_path() -> PathBuf {
-        let config_dir = env::var("CONFIG_PATH").unwrap_or_else(|_| ".".to_string()); // TODO: change default config path
-        PathBuf::from(config_dir).join("config.toml")
+        PathBuf::from(&*crate::globals::CONFIG_DIR).join("config.toml")
     }
 
     /// Load config from $CONFIG_PATH/config.toml

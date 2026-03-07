@@ -11,6 +11,7 @@ use crate::tasks::task_manager::create_task_channel;
 mod agent;
 mod channels;
 mod config;
+mod globals;
 mod tasks;
 
 /// Main function demonstrating tool integration with an OpenAI-compatible endpoint.

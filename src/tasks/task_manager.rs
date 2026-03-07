@@ -139,15 +139,15 @@ impl TaskProcessor {
                             task_queue = new_queue;
 
                             if found {
-                                let _ = reply_tx.send(Ok(()));
+                                reply_tx.send(Ok(())).unwrap();
                             } else {
-                                let _ = reply_tx.send(Err(CancelError::NotFound));
+                                reply_tx.send(Err(CancelError::NotFound)).unwrap();
                             }
                         }
                         TaskCommand::ListTasks(reply_tx) => {
                             let mut tasks: Vec<_> = task_queue.iter().cloned().collect();
                             tasks.sort();
-                            let _ = reply_tx.send(tasks);
+                            reply_tx.send(tasks).unwrap();
                         }
                     }
                 },

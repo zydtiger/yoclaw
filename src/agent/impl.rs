@@ -1,7 +1,10 @@
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
+use crate::{
+    agent::{tools, Agent, FinishReason, Message, Response, Role},
+    config::AgentConfig,
+};
 
 impl Message {
     pub fn new(role: Role, content: String) -> Self {
@@ -28,13 +31,10 @@ impl Message {
 
 impl Agent {
     pub fn new(
-        api_url: &str,
-        api_key: &str,
-        model: &str,
-        system_prompt: &str,
+        agent_config: &AgentConfig,
         task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
     ) -> Result<Self, url::ParseError> {
-        let parsed_url = match url::Url::parse(api_url) {
+        let parsed_url = match url::Url::parse(&agent_config.openai_api_base_url) {
             Ok(url) => url,
             Err(e) => {
                 log::error!("Failed to parse API URL: {}", e);
@@ -45,12 +45,16 @@ impl Agent {
 
         Ok(Self {
             api_url: parsed_url,
-            api_key: api_key.to_string(),
-            model: model.to_string(),
+            api_key: agent_config.openai_api_key.clone(),
+            model: agent_config.openai_model.clone(),
+            debug_mode: agent_config.debug_mode,
 
             tools: tools::get_all_tools(),
             client: Client::new(),
-            messages: vec![Message::new(Role::System, system_prompt.to_string())],
+            messages: vec![Message::new(
+                Role::System,
+                agent_config.system_prompt.clone(),
+            )],
             task_manager,
         })
     }
@@ -120,11 +124,23 @@ impl Agent {
                 }
                 _ => {
                     // Standard Text Response
-                    return choice
-                        .message
-                        .content
-                        .clone()
-                        .unwrap_or_else(|| "Error: Empty message".into());
+                    let content = choice.message.content.clone();
+                    if let Some(s) = content {
+                        if self.debug_mode {
+                            let debug_info = json!({
+                                "timings": response.timings,
+                                "usage": response.usage
+                            });
+                            let formatted = serde_json::to_string_pretty(&debug_info)
+                                .unwrap_or_else(|_e| {
+                                    format!("{{\"error\":\"Failed to format debug info\"}}")
+                                });
+                            return format!("{}\n\n{}", s, formatted);
+                        }
+                        return s;
+                    } else {
+                        return "Error: Empty message".into();
+                    }
                 }
             };
         }

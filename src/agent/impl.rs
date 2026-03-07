@@ -35,7 +35,7 @@ impl Agent {
         task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
     ) -> Result<Self, reqwest::Error> {
         let parsed_url = match api_url.into_url() {
-            Ok(url) => url,
+            Ok(url) => url.join("chat/completions"),
             Err(e) => {
                 log::error!("Failed to parse API URL: {}", e);
                 return Err(e);

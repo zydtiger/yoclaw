@@ -8,6 +8,7 @@ pub struct AgentConfig {
     pub openai_api_key: String,
     pub openai_model: String,
     pub system_prompt: String,
+    pub debug_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

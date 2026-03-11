@@ -31,8 +31,8 @@ impl MemoryStore {
         // We assume 1536 as the default embedding size (e.g. for OpenAI models)
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
-                embedding float[1536] distance_metric=cosine
-            )", // TODO: make embedding dim configurable
+                embedding float[4096] distance_metric=cosine
+            )", // TODO: make embedding dim configurable, currently hard-coded to qwen3-embedding-8b
             [],
         )?;
 
@@ -73,7 +73,11 @@ impl MemoryStore {
 
     /// Searches for `top_k` closest memories to the provided embedding vector.
     /// Returns a list of matching memory texts along with their cosine similarities.
-    pub fn search_memory(&self, embedding: &[f32], top_k: usize) -> Result<Vec<(i64, String, f32)>> {
+    pub fn search_memory(
+        &self,
+        embedding: &[f32],
+        top_k: usize,
+    ) -> Result<Vec<(i64, String, f32)>> {
         let bytes: &[u8] = bytemuck::cast_slice(embedding);
 
         let mut stmt = self.conn.prepare(

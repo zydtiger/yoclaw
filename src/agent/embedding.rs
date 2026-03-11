@@ -32,7 +32,6 @@ impl Embedding {
         let request_body = json!({
             "model": self.model,
             "input": text,
-            "dimensions": 1536, // TODO: make embedding dim configurable
         });
 
         let response = self

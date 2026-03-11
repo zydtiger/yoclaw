@@ -47,6 +47,7 @@ impl ToolCall {
     pub async fn execute(
         &self,
         environment: &std::collections::HashMap<String, String>,
+        skill_store: &crate::agent::skills::SkillStore,
         task_manager: std::sync::Arc<crate::tasks::TaskManager>,
         embedding: &crate::agent::Embedding,
         memory_store: &crate::agent::MemoryStore,
@@ -55,6 +56,9 @@ impl ToolCall {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
             "generic_shell" => {
                 builtins::generic_shell(self.function.arguments.clone(), environment).await
+            }
+            "use_skill" => {
+                builtins::use_skill(self.function.arguments.clone(), skill_store).await
             }
             "read_file" => builtins::read_file(self.function.arguments.clone()).await,
             "write_file" => builtins::write_file(self.function.arguments.clone()).await,
@@ -109,9 +113,30 @@ pub fn get_all_tools() -> Vec<Tool> {
                         "command": {
                             "type": "string",
                             "description": "The shell command to execute".to_string()
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Optional working directory for the command. Use the base_dir of a skill when running its scripts.".to_string()
                         }
                     }),
                     required: Some(vec!["command".to_string()]),
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "use_skill".to_string(),
+                description: "Retrieves the full contents (instructions/code) of an available skill by its name.".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the skill to fetch contents for".to_string()
+                        }
+                    }),
+                    required: Some(vec!["name".to_string()]),
                 },
             },
         },

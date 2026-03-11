@@ -5,7 +5,11 @@ use crate::tasks::{TaskId, TaskManager};
 use super::{Channel, ChannelHandler};
 
 impl ChannelHandler {
-    pub async fn new(channel: Box<dyn Channel>, allowed_users: Vec<String>) -> Self {
+    pub async fn new(
+        channel: Box<dyn Channel>,
+        allowed_users: Vec<String>,
+        recv_confirm: Option<String>,
+    ) -> Self {
         let task_routes = Self::load_routes().await.unwrap_or_else(|e| {
             log::warn!("Failed to load task routes: {}", e);
             HashMap::new()
@@ -14,6 +18,7 @@ impl ChannelHandler {
         Self {
             channel,
             allowed_users,
+            recv_confirm,
             task_routes,
         }
     }
@@ -105,11 +110,12 @@ impl ChannelHandler {
                                     Ok(task_id) => {
                                         self.task_routes.insert(task_id, msg.chat_id.clone());
                                         log::info!("Scheduled task #{} for incoming message", task_id);
-                                        // TODO: make response configurable
-                                        match self.channel.react_with_emoji(&msg.chat_id, msg.message_id, "👍").await {
-                                            Ok(()) => log::info!("Successfully reacted to user message"),
-                                            Err(e) => log::error!("Failed to respond: {}", e),
-                                        };
+                                        if let Some(emoji) = &self.recv_confirm {
+                                            match self.channel.react_with_emoji(&msg.chat_id, msg.message_id, emoji).await {
+                                                Ok(()) => log::info!("Successfully reacted to user message"),
+                                                Err(e) => log::error!("Failed to respond: {}", e),
+                                            };
+                                        }
                                     }
                                     Err(e) => {
                                         log::error!("Failed to schedule task for incoming message: {}", e);

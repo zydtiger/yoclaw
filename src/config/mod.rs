@@ -16,6 +16,7 @@ pub struct ChannelsConfig {
     pub telegram_token: String,
     #[serde(default)]
     pub allowed_users: Vec<String>,
+    pub recv_confirm: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

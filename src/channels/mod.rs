@@ -43,5 +43,6 @@ pub trait Channel: Send + Sync {
 pub struct ChannelHandler {
     pub channel: Box<dyn Channel>,
     pub allowed_users: Vec<String>,
+    pub recv_confirm: Option<String>,
     pub task_routes: std::collections::HashMap<crate::tasks::TaskId, String>,
 }

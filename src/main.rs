@@ -22,7 +22,12 @@ async fn main() {
     // Create Telegram channel
     let telegram_token = config.channels.telegram_token.clone();
     let channel = Box::new(TelegramChannel::new(telegram_token));
-    let channel_handler = ChannelHandler::new(channel, config.channels.allowed_users.clone()).await;
+    let channel_handler = ChannelHandler::new(
+        channel,
+        config.channels.allowed_users.clone(),
+        config.channels.recv_confirm.clone(),
+    )
+    .await;
 
     // Create task channel pair
     let (task_manager, task_processor) = create_task_channel().await;

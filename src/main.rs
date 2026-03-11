@@ -22,7 +22,7 @@ async fn main() {
     // Create Telegram channel
     let telegram_token = config.channels.telegram_token.clone();
     let channel = Box::new(TelegramChannel::new(telegram_token));
-    let channel_handler = ChannelHandler::new(channel);
+    let channel_handler = ChannelHandler::new(channel, config.channels.allowed_users.clone()).await;
 
     // Create task channel pair
     let (task_manager, task_processor) = create_task_channel().await;
@@ -58,10 +58,11 @@ async fn main() {
     });
 
     // Spawn unified Telegram coroutine - handles both polling and sending
-    let (channel_tx, channel_rx) = mpsc::channel::<String>(16);
+    let (channel_tx, channel_rx) = mpsc::channel::<(crate::tasks::TaskId, String)>(16);
+    let handler_shutdown_signal = shutdown_signal.clone();
     tokio::spawn(async move {
         channel_handler
-            .start_listening(channel_rx, task_manager)
+            .start_listening(channel_rx, task_manager, handler_shutdown_signal)
             .await;
     });
 
@@ -81,7 +82,7 @@ async fn main() {
         log::info!("Executing task {}", task.id);
         let response = agent.send_message(task.payload).await;
         channel_tx
-            .send(response)
+            .send((task.id, response))
             .await
             .expect("Failed to send to channel");
     }

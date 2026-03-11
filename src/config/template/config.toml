@@ -12,6 +12,7 @@ openai_model = 'qwen3-embedding:8b'
 
 [channels]
 telegram_token = ""
+allowed_users = []
 
 # [environment]
 # CUSTOM_VAR = "value"

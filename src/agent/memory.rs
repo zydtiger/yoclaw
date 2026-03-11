@@ -73,12 +73,13 @@ impl MemoryStore {
 
     /// Searches for `top_k` closest memories to the provided embedding vector.
     /// Returns a list of matching memory texts along with their cosine similarities.
-    pub fn search_memory(&self, embedding: &[f32], top_k: usize) -> Result<Vec<(String, f32)>> {
+    pub fn search_memory(&self, embedding: &[f32], top_k: usize) -> Result<Vec<(i64, String, f32)>> {
         let bytes: &[u8] = bytemuck::cast_slice(embedding);
 
         let mut stmt = self.conn.prepare(
             r#"
             SELECT 
+                memories.id,
                 memories.text,
                 (1.0 - vec_distance_cosine(memories_vec.embedding, ?1)) AS similarity
             FROM memories_vec
@@ -91,9 +92,10 @@ impl MemoryStore {
 
         let results = stmt
             .query_map(params![bytes, top_k as i64], |row| {
-                let text: String = row.get(0)?;
-                let similarity: f32 = row.get(1)?;
-                Ok((text, similarity))
+                let id: i64 = row.get(0)?;
+                let text: String = row.get(1)?;
+                let similarity: f32 = row.get(2)?;
+                Ok((id, text, similarity))
             })?
             .collect::<Result<Vec<_>>>()?;
 
@@ -179,7 +181,8 @@ mod tests {
             .expect("Search failed");
         assert_eq!(results.len(), 1);
 
-        let (text, similarity) = &results[0];
+        let (id, text, similarity) = &results[0];
+        assert_eq!(*id, 1);
         assert_eq!(text, "Lorem ipsum dolor sit amet");
         assert!(*similarity > 0.99);
     }

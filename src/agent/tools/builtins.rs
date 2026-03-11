@@ -345,8 +345,14 @@ pub async fn search_memory(
                 "No relevant memories found.".to_string()
             } else {
                 let mut output = format!("Found {} memories:\n", results.len());
-                for (i, (text, sim)) in results.iter().enumerate() {
-                    output.push_str(&format!("{}. {} (Similarity: {:.4})\n", i + 1, text, sim));
+                for (i, (id, text, sim)) in results.iter().enumerate() {
+                    output.push_str(&format!(
+                        "{}. [ID: {}] {} (Similarity: {:.4})\n",
+                        i + 1,
+                        id,
+                        text,
+                        sim
+                    ));
                 }
                 output
             }

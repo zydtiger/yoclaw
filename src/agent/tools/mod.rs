@@ -72,7 +72,8 @@ impl ToolCall {
                 builtins::remove_memory(self.function.arguments.clone(), memory_store).await
             }
             "search_memory" => {
-                builtins::search_memory(self.function.arguments.clone(), embedding, memory_store).await
+                builtins::search_memory(self.function.arguments.clone(), embedding, memory_store)
+                    .await
             }
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }

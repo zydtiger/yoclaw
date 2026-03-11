@@ -27,8 +27,9 @@ impl Message {
 }
 
 impl Agent {
-    pub fn new(
+    pub async fn new(
         agent_config: &crate::config::AgentConfig,
+        environment: std::collections::HashMap<String, String>,
         task_manager: std::sync::Arc<crate::tasks::TaskManager>,
         memory_store: crate::agent::MemoryStore,
         embedding: crate::agent::Embedding,
@@ -42,17 +43,34 @@ impl Agent {
         };
         let parsed_url = parsed_url.join("chat/completions")?;
 
+        let mut system_prompt = agent_config.system_prompt.clone();
+        
+        // Load Anthropic-compatible skills context
+        match crate::agent::skills::SkillStore::load_skills().await {
+            Ok(skill_store) => {
+                let skills_ctx = skill_store.get_context();
+                if !skills_ctx.is_empty() {
+                    system_prompt.push_str("\n\n");
+                    system_prompt.push_str(&skills_ctx);
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to load skills context: {}", e);
+            }
+        }
+
         Ok(Self {
             api_url: parsed_url,
             api_key: agent_config.openai_api_key.clone(),
             model: agent_config.openai_model.clone(),
             debug_mode: agent_config.debug_mode,
+            environment,
 
             tools: tools::get_all_tools(),
             client: Client::new(),
             messages: vec![Message::new(
                 Role::System,
-                agent_config.system_prompt.clone(),
+                system_prompt,
             )],
             task_manager,
             memory_store,
@@ -117,6 +135,7 @@ impl Agent {
                         log::info!("Calling tool: {}", tool_call.function.name);
                         let tool_result = tool_call
                             .execute(
+                                &self.environment,
                                 self.task_manager.clone(),
                                 &self.embedding,
                                 &self.memory_store,

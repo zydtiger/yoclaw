@@ -2,6 +2,7 @@ use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
 mod r#impl;
+mod memory;
 mod tools;
 
 use tools::{Tool, ToolCall};
@@ -92,6 +93,7 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+/// Agent struct
 #[derive(Debug, Clone)]
 pub struct Agent {
     pub api_url: Url,
@@ -104,4 +106,9 @@ pub struct Agent {
     pub client: Client,
     pub messages: Vec<Message>,
     pub task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+}
+
+/// Memory store struct for vector database
+pub struct MemoryStore {
+    conn: rusqlite::Connection,
 }

@@ -116,7 +116,7 @@ pub fn get_all_tools() -> Vec<Tool> {
                         },
                         "cwd": {
                             "type": "string",
-                            "description": "Optional working directory for the command. Use the base_dir of a skill when running its scripts.".to_string()
+                            "description": "Optional working directory for the command. Use the path of a skill when running its scripts.".to_string()
                         }
                     }),
                     required: Some(vec!["command".to_string()]),

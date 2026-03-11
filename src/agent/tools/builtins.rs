@@ -69,7 +69,7 @@ pub async fn generic_shell(
     }
 }
 
-/// Retrieves the raw contents of a loaded skill by name.
+/// Retrieves the raw contents of a loaded skill by name dynamically from disk to ensure it's not stale.
 pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillStore) -> String {
     let args = if let Some(inner_str) = args.as_str() {
         match serde_json::from_str::<Value>(inner_str) {
@@ -81,20 +81,35 @@ pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillSto
     };
 
     let name = match args.pointer("/name").and_then(|v| v.as_str()) {
-        Some(n) => n.to_string(),
+        Some(n) => n,
         None => return "Error: 'name' field missing or not a string".to_string(),
     };
 
-    log::info!("Using skill: {}", name);
+    let skill = match skill_store.get_skill(name) {
+        Some(s) => s,
+        None => return format!("Error: Skill '{}' not found in the skill metadata list.", name),
+    };
 
-    match skill_store.get_skill(&name) {
-        Some(skill) => format!(
-            "Skill contents for '{}':\n\n{}\n\nBase directory: {}",
-            name, skill.contents, skill.base_dir
+    // Attempt to load the skill dynamically from disk to get latest changes
+    let target_path = std::path::Path::new(&skill.path);
+
+    // If it's a directory, we need to read SKILL.md inside it.
+    // If it's a file, we read it directly.
+    let file_to_read = if target_path.is_dir() {
+        target_path.join("SKILL.md")
+    } else {
+        target_path.to_path_buf()
+    };
+
+    match tokio::fs::read_to_string(&file_to_read).await {
+        Ok(contents) => format!(
+            "Skill contents for '{}':\n\n{}\n\nPath: {}",
+            skill.name, contents, skill.path
         ),
-        None => format!(
-            "Error: Skill '{}' not found in the skill metadata list.",
-            name
+        Err(e) => format!(
+            "Error loading skill file from disk at '{}': {}",
+            file_to_read.display(),
+            e
         ),
     }
 }

@@ -46,13 +46,16 @@ pub struct ToolCall {
 impl ToolCall {
     pub async fn execute(
         &self,
+        environment: &std::collections::HashMap<String, String>,
         task_manager: std::sync::Arc<crate::tasks::TaskManager>,
         embedding: &crate::agent::Embedding,
         memory_store: &crate::agent::MemoryStore,
     ) -> String {
         match self.function.name.as_str() {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
-            "generic_shell" => builtins::generic_shell(self.function.arguments.clone()).await,
+            "generic_shell" => {
+                builtins::generic_shell(self.function.arguments.clone(), environment).await
+            }
             "read_file" => builtins::read_file(self.function.arguments.clone()).await,
             "write_file" => builtins::write_file(self.function.arguments.clone()).await,
             "get_url" => builtins::get_url(self.function.arguments.clone()).await,

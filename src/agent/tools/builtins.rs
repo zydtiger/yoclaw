@@ -8,7 +8,10 @@ pub fn get_current_time(_args: Value) -> String {
 
 /// Executes generic shell command and return command output.
 /// Expects args to be { "command": string }
-pub async fn generic_shell(args: Value) -> String {
+pub async fn generic_shell(
+    args: Value,
+    environment: &std::collections::HashMap<String, String>,
+) -> String {
     let args = if let Some(inner_str) = args.as_str() {
         // If it's a string, we MUST be able to decode it.
         match serde_json::from_str::<Value>(inner_str) {
@@ -37,6 +40,7 @@ pub async fn generic_shell(args: Value) -> String {
 
     // Execute the program directly with its arguments
     let output = match tokio::process::Command::new(program)
+        .envs(environment)
         .args(cmd_args)
         .output()
         .await

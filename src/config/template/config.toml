@@ -5,5 +5,10 @@ openai_model = 'qwen3-4b'
 system_prompt = "Your name is YoClaw, and you are a helpful assistant."
 debug_mode = false
 
+[embedding]
+openai_api_base_url = 'http://localhost:11434/v1'
+openai_api_key = 'ollama'
+openai_model = 'qwen3-embedding:8b'
+
 [channels]
 telegram_token = ""

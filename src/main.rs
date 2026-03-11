@@ -28,9 +28,15 @@ async fn main() {
     let (task_manager, task_processor) = create_task_channel().await;
     let task_manager = Arc::new(task_manager);
 
+    // Create MemoryStore and Embedding instances
+    let memory_store =
+        agent::MemoryStore::new("memory.db").expect("Failed to initialize MemoryStore");
+    let embedding =
+        agent::Embedding::new(&config.embedding).expect("Failed to initialize Embedding");
+
     // Create a single Agent instance (shared across all tasks, no cloning)
-    let agent =
-        Agent::new(&config.agent, task_manager.clone()).expect("Failed to initialize Agent");
+    let agent = Agent::new(&config.agent, task_manager.clone(), memory_store, embedding)
+        .expect("Failed to initialize Agent");
 
     // Set up signal handler for graceful shutdown
     let shutdown_signal = Arc::new(Notify::new());

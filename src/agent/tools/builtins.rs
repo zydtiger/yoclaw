@@ -249,3 +249,114 @@ pub async fn list_tasks(
         Err(e) => format!("Error serializing task list: {}", e),
     }
 }
+
+/// Adds a new memory string into the vector database.
+pub async fn add_memory(
+    args: Value,
+    embedding: &crate::agent::Embedding,
+    memory_store: &crate::agent::MemoryStore,
+) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        args
+    };
+
+    let text = match args.pointer("/text").and_then(|v| v.as_str()) {
+        Some(t) => t.to_string(),
+        None => return "Error: 'text' field missing or not a string".to_string(),
+    };
+
+    log::info!("Adding memory: {}", text);
+
+    let doc_embedding = match embedding.embed_doc(&text).await {
+        Ok(e) => e,
+        Err(e) => return format!("Error generating embedding: {}", e),
+    };
+
+    match memory_store.add_memory(&text, &doc_embedding) {
+        Ok(id) => format!("Successfully added memory with ID: {}", id),
+        Err(e) => format!("Error storing memory: {}", e),
+    }
+}
+
+/// Removes a memory from the vector database by ID.
+pub async fn remove_memory(args: Value, memory_store: &crate::agent::MemoryStore) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        args
+    };
+
+    let id = match args.pointer("/id").and_then(|v| v.as_u64()) {
+        Some(id) => id as i64,
+        None => return "Error: 'id' field missing or not a positive integer".to_string(),
+    };
+
+    log::info!("Removing memory #{}", id);
+
+    match memory_store.remove_memory(id) {
+        Ok(_) => format!("Successfully removed memory ID: {}", id),
+        Err(e) => format!("Error removing memory: {}", e),
+    }
+}
+
+/// Searches for relevant memories using semantic similarity.
+pub async fn search_memory(
+    args: Value,
+    embedding: &crate::agent::Embedding,
+    memory_store: &crate::agent::MemoryStore,
+) -> String {
+    let args = if let Some(inner_str) = args.as_str() {
+        match serde_json::from_str::<Value>(inner_str) {
+            Ok(v) => v,
+            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+        }
+    } else {
+        args
+    };
+
+    let query = match args.pointer("/query").and_then(|v| v.as_str()) {
+        Some(q) => q.to_string(),
+        None => return "Error: 'query' field missing or not a string".to_string(),
+    };
+
+    let top_k = match args.pointer("/top_k").and_then(|v| v.as_u64()) {
+        Some(k) => k as usize,
+        None => return "Error: 'top_k' field missing or not a positive integer".to_string(),
+    };
+
+    log::info!("Searching memories for: {} (top_k: {})", query, top_k);
+
+    let query_embedding = match embedding.embed_query(&query).await {
+        Ok(e) => e,
+        Err(e) => return format!("Error generating query embedding: {}", e),
+    };
+
+    match memory_store.search_memory(&query_embedding, top_k) {
+        Ok(results) => {
+            if results.is_empty() {
+                "No relevant memories found.".to_string()
+            } else {
+                let mut output = format!("Found {} memories:\n", results.len());
+                for (i, (id, text, sim)) in results.iter().enumerate() {
+                    output.push_str(&format!(
+                        "{}. [ID: {}] {} (Similarity: {:.4})\n",
+                        i + 1,
+                        id,
+                        text,
+                        sim
+                    ));
+                }
+                output
+            }
+        }
+        Err(e) => format!("Error searching memories: {}", e),
+    }
+}

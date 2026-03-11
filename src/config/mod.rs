@@ -17,8 +17,16 @@ pub struct ChannelsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    pub openai_api_base_url: String,
+    pub openai_api_key: String,
+    pub openai_model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: AgentConfig,
+    pub embedding: EmbeddingConfig,
     pub channels: ChannelsConfig,
 }
 

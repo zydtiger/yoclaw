@@ -1,10 +1,7 @@
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::{
-    agent::{tools, Agent, FinishReason, Message, Response, Role},
-    config::AgentConfig,
-};
+use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
 
 impl Message {
     pub fn new(role: Role, content: String) -> Self {
@@ -31,8 +28,10 @@ impl Message {
 
 impl Agent {
     pub fn new(
-        agent_config: &AgentConfig,
+        agent_config: &crate::config::AgentConfig,
         task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+        memory_store: crate::agent::MemoryStore,
+        embedding: crate::agent::Embedding,
     ) -> Result<Self, url::ParseError> {
         let parsed_url = match url::Url::parse(&agent_config.openai_api_base_url) {
             Ok(url) => url,
@@ -56,6 +55,8 @@ impl Agent {
                 agent_config.system_prompt.clone(),
             )],
             task_manager,
+            memory_store,
+            embedding,
         })
     }
 
@@ -114,7 +115,13 @@ impl Agent {
 
                     for tool_call in tool_calls {
                         log::info!("Calling tool: {}", tool_call.function.name);
-                        let tool_result = tool_call.execute(self.task_manager.clone()).await;
+                        let tool_result = tool_call
+                            .execute(
+                                self.task_manager.clone(),
+                                &self.embedding,
+                                &self.memory_store,
+                            )
+                            .await;
 
                         let message = Message::new(Role::Tool, tool_result)
                             .with_name(tool_call.function.name.clone())

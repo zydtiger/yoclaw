@@ -21,7 +21,7 @@ async fn main() {
     let config = config::Config::load().await.expect("Failed to load config");
 
     // Create Telegram channel
-    let telegram_token = config.channels.telegram_token;
+    let telegram_token = config.channels.telegram_token.clone();
     let channel = Arc::new(TelegramChannel::new(telegram_token));
 
     // Create task channel pair
@@ -35,7 +35,14 @@ async fn main() {
         agent::Embedding::new(&config.embedding).expect("Failed to initialize Embedding");
 
     // Create a single Agent instance (shared across all tasks, no cloning)
-    let mut agent = Agent::new(&config.agent, task_manager.clone(), memory_store, embedding)
+    let mut agent = Agent::new(
+        &config.agent,
+        config.environment,
+        task_manager.clone(),
+        memory_store,
+        embedding,
+    )
+    .await
         .expect("Failed to initialize Agent");
 
     // Set up signal handler for graceful shutdown

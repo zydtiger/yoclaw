@@ -47,6 +47,8 @@ impl ToolCall {
     pub async fn execute(
         &self,
         task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+        embedding: &crate::agent::Embedding,
+        memory_store: &crate::agent::MemoryStore,
     ) -> String {
         match self.function.name.as_str() {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
@@ -62,6 +64,15 @@ impl ToolCall {
             }
             "list_tasks" => {
                 builtins::list_tasks(self.function.arguments.clone(), task_manager).await
+            }
+            "add_memory" => {
+                builtins::add_memory(self.function.arguments.clone(), embedding, memory_store).await
+            }
+            "remove_memory" => {
+                builtins::remove_memory(self.function.arguments.clone(), memory_store).await
+            }
+            "search_memory" => {
+                builtins::search_memory(self.function.arguments.clone(), embedding, memory_store).await
             }
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }
@@ -202,6 +213,61 @@ pub fn get_all_tools() -> Vec<Tool> {
                     r#type: "object".to_string(),
                     properties: json!({}),
                     required: None,
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "add_memory".to_string(),
+                description: "Adds a new memory string into the vector database".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "text": {
+                            "type": "string",
+                            "description": "The textual memory to store".to_string()
+                        }
+                    }),
+                    required: Some(vec!["text".to_string()]),
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "remove_memory".to_string(),
+                description: "Removes a memory from the vector database by ID".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "id": {
+                            "type": "number",
+                            "description": "The ID of the memory to remove".to_string()
+                        }
+                    }),
+                    required: Some(vec!["id".to_string()]),
+                },
+            },
+        },
+        Tool {
+            r#type: "function".to_string(),
+            function: FunctionTool {
+                name: "search_memory".to_string(),
+                description: "Searches for relevant memories using semantic similarity".to_string(),
+                parameters: Parameters {
+                    r#type: "object".to_string(),
+                    properties: json!({
+                        "query": {
+                            "type": "string",
+                            "description": "The search query".to_string()
+                        },
+                        "top_k": {
+                            "type": "number",
+                            "description": "The maximum number of results to return".to_string()
+                        }
+                    }),
+                    required: Some(vec!["query".to_string(), "top_k".to_string()]),
                 },
             },
         },

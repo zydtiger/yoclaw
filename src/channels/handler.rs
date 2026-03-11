@@ -93,7 +93,8 @@ impl ChannelHandler {
                                     }
 
                                     // Send a warning back to the unauthorized user
-                                    if let Err(e) = self.channel.send_message(&msg.chat_id, "⚠️ You are not allowed to access this bot").await {
+                                    let warning_msg = format!("⚠️ You are not allowed to access this bot. Your User ID is {}", msg.sender_id);
+                                    if let Err(e) = self.channel.send_message(&msg.chat_id, &warning_msg).await {
                                         log::error!("Failed to send blocked warning message to Telegram: {}", e);
                                     }
                                     continue;

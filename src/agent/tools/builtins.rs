@@ -28,18 +28,10 @@ pub async fn generic_shell(
         None => return "Error: 'command' field missing or not a string".to_string(),
     };
 
-    // Split the command into program and arguments
-    let parts: Vec<&str> = command.split_whitespace().collect();
-    if parts.is_empty() {
-        return "Error: empty command".to_string();
-    }
-
-    let program = parts[0];
-    let cmd_args = &parts[1..];
-
-    // Execute the program directly with its arguments
-    let mut cmd = tokio::process::Command::new(program);
-    cmd.envs(environment).args(cmd_args);
+    // Execute the program via sh -c to support complex commands and pipes
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c").arg(&command);
+    cmd.envs(environment);
 
     if let Some(cwd) = args.pointer("/cwd").and_then(|v| v.as_str()) {
         log::info!("Setting working directory to: {}", cwd);

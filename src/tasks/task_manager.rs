@@ -118,7 +118,7 @@ impl TaskProcessor {
 
     /// Run the task processor loop in the main process.
     ///
-    /// IMPORTANT: Agent MUST run in a SEPARATE coroutine (tokio::spawn) to avoid deadlock.
+    /// IMPORTANT: TaskProcessor loop MUST run in a SEPARATE coroutine (tokio::spawn) to avoid deadlock.
     ///
     /// When Agent executes tools like schedule_task, cancel_task, or list_tasks, it calls
     /// back to TaskManager which sends messages through this TaskProcessor's channel.
@@ -130,99 +130,101 @@ impl TaskProcessor {
     /// 4. Agent is BLOCKED waiting for TaskProcessor to schedule new task
     /// 5. DEADLOCK!
     ///
-    /// By running Agent in a separate coroutine, both can proceed concurrently.
+    /// By running the TaskProcessor loop in a separate coroutine, the Agent can proceed
+    /// concurrently while keeping its !Send State local to the main thread.
     pub async fn run(mut self, mut agent: crate::agent::Agent, channel_tx: mpsc::Sender<String>) {
-        // Agent worker in SEPARATE coroutine - avoids deadlock when Agent uses tools
-        // that call back to TaskManager (schedule_task, cancel_task, list_tasks)
+        // Task processor in SEPARATE coroutine - allows Agent to be !Send
         let (agent_tx, mut agent_rx) = mpsc::channel::<Task>(32);
+        
         tokio::spawn(async move {
-            while let Some(task) = agent_rx.recv().await {
-                log::info!("Executing task {}", task.id);
-                let response = agent.send_message(task.payload).await;
-                channel_tx
-                    .send(response)
-                    .await
-                    .expect("Failed to send to channel");
+            loop {
+                // Calculate sleep duration to next deadline
+                // (Tokio sleep requires a std::time::Duration)
+                let sleep_duration = match self.pending_tasks.peek() {
+                    Some(task) => {
+                        let now = Utc::now();
+                        if task.deadline <= now {
+                            std::time::Duration::ZERO
+                        } else {
+                            (task.deadline - now)
+                                .to_std()
+                                .unwrap_or(std::time::Duration::ZERO)
+                        }
+                    }
+                    None => std::time::Duration::MAX,
+                };
+
+                tokio::select! {
+                    // Branch 1: New task or cancellation arrives
+                    Some(msg) = self.task_rx.recv() => {
+                        match msg {
+                            TaskCommand::Schedule(task) => {
+                                log::info!("Task #{} scheduled for {:?}", task.id, task.deadline);
+                                self.pending_tasks.push(task);
+                            }
+                            TaskCommand::Cancel(task_id, reply_tx) => {
+                                let mut found = false;
+                                let mut new_queue = BinaryHeap::new();
+                                for task in self.pending_tasks.drain() {
+                                    if task.id == task_id {
+                                        found = true;
+                                    } else {
+                                        new_queue.push(task);
+                                    }
+                                }
+                                self.pending_tasks = new_queue;
+
+                                if found {
+                                    reply_tx.send(Ok(())).unwrap();
+                                } else {
+                                    reply_tx.send(Err(CancelError::NotFound)).unwrap();
+                                }
+                            }
+                            TaskCommand::ListTasks(reply_tx) => {
+                                let mut tasks: Vec<_> = self.pending_tasks.iter().cloned().collect();
+                                tasks.sort();
+                                reply_tx.send(tasks).unwrap();
+                            }
+                        }
+                    },
+
+                    // Branch 2: Timer fires (next deadline reached)
+                    _ = sleep(sleep_duration) => {
+                        // Process all ready tasks
+                        while let Some(task) = self.pending_tasks.peek() {
+                            if task.is_ready() {
+                                let task = self.pending_tasks.pop().unwrap();
+                                agent_tx.send(task).await.expect("Agent worker coroutine died");
+                            } else {
+                                break; // Next task not ready yet
+                            }
+                        }
+                    },
+
+                    // Branch 3: Channel closed (graceful shutdown)
+                    else => {
+                        log::info!("TaskProcessor shutting down, saving {} pending task(s)", self.pending_tasks.len());
+                        // Save pending tasks before exiting
+                        let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
+                        if let Err(e) = Self::save_tasks(&pending).await {
+                            log::error!("Failed to save pending tasks: {}", e);
+                        } else {
+                            log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
+                        }
+                        break;
+                    },
+                }
             }
         });
 
-        loop {
-            // Calculate sleep duration to next deadline
-            // (Tokio sleep requires a std::time::Duration)
-            let sleep_duration = match self.pending_tasks.peek() {
-                Some(task) => {
-                    let now = Utc::now();
-                    if task.deadline <= now {
-                        std::time::Duration::ZERO
-                    } else {
-                        (task.deadline - now)
-                            .to_std()
-                            .unwrap_or(std::time::Duration::ZERO)
-                    }
-                }
-                None => std::time::Duration::MAX,
-            };
-
-            tokio::select! {
-                // Branch 1: New task or cancellation arrives
-                Some(msg) = self.task_rx.recv() => {
-                    match msg {
-                        TaskCommand::Schedule(task) => {
-                            log::info!("Task #{} scheduled for {:?}", task.id, task.deadline);
-                            self.pending_tasks.push(task);
-                        }
-                        TaskCommand::Cancel(task_id, reply_tx) => {
-                            let mut found = false;
-                            let mut new_queue = BinaryHeap::new();
-                            for task in self.pending_tasks.drain() {
-                                if task.id == task_id {
-                                    found = true;
-                                } else {
-                                    new_queue.push(task);
-                                }
-                            }
-                            self.pending_tasks = new_queue;
-
-                            if found {
-                                reply_tx.send(Ok(())).unwrap();
-                            } else {
-                                reply_tx.send(Err(CancelError::NotFound)).unwrap();
-                            }
-                        }
-                        TaskCommand::ListTasks(reply_tx) => {
-                            let mut tasks: Vec<_> = self.pending_tasks.iter().cloned().collect();
-                            tasks.sort();
-                            reply_tx.send(tasks).unwrap();
-                        }
-                    }
-                },
-
-                // Branch 2: Timer fires (next deadline reached)
-                _ = sleep(sleep_duration) => {
-                    // Process all ready tasks
-                    while let Some(task) = self.pending_tasks.peek() {
-                        if task.is_ready() {
-                            let task = self.pending_tasks.pop().unwrap();
-                            agent_tx.send(task).await.expect("Agent worker coroutine died");
-                        } else {
-                            break; // Next task not ready yet
-                        }
-                    }
-                },
-
-                // Branch 3: Channel closed (graceful shutdown)
-                else => {
-                    log::info!("TaskProcessor shutting down, saving {} pending task(s)", self.pending_tasks.len());
-                    // Save pending tasks before exiting
-                    let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
-                    if let Err(e) = Self::save_tasks(&pending).await {
-                        log::error!("Failed to save pending tasks: {}", e);
-                    } else {
-                        log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
-                    }
-                    break;
-                },
-            }
+        // Run Agent directly on the current thread, allowing it to hold !Send objects safely
+        while let Some(task) = agent_rx.recv().await {
+            log::info!("Executing task {}", task.id);
+            let response = agent.send_message(task.payload).await;
+            channel_tx
+                .send(response)
+                .await
+                .expect("Failed to send to channel");
         }
     }
 

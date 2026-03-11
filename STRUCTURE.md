@@ -10,16 +10,17 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 
 ## All `tokio::spawn` Locations
 
-| #   | Location                    | Purpose                                       |
-| --- | --------------------------- | --------------------------------------------- |
-| 1   | `src/main.rs` (lines 35-72) | **Unified Telegram** coroutine (poll + send)  |
-| 2   | `src/main.rs` (lines 90-95) | **TaskProcessor** coroutine (avoids deadlock) |
+| #   | Location                    | Purpose                                           |
+| --- | --------------------------- | ------------------------------------------------- |
+| 1   | `src/main.rs` (lines 51-58) | **Graceful Shutdown** coroutine (SIGTERM listener) |
+| 2   | `src/main.rs` (lines 62-66) | **Unified Telegram** coroutine (poll + send)      |
+| 3   | `src/main.rs` (lines 72-75) | **TaskProcessor** coroutine (avoids deadlock)     |
 
 ---
 
 ## 1. Unified Telegram Coroutine
 
-**Location:** `src/main.rs` (lines 35-72)
+**Location:** `src/main.rs` (lines 62-66)
 
 ### Main Actor
 
@@ -47,18 +48,30 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 
 ```rust
 loop {
-    tokio::select! {
+tokio::select! {
         // Branch 1: Send outgoing messages
-        Some(msg) = rx.recv() => {
-            channel_send.send_message(chat_id, &msg).await;
+        Some((task_id, msg)) = channel_rx.recv() => {
+            // Route the message to the original chat_id
+            let chat_id = match self.task_routes.remove(&task_id) { ... };
+            channel.send_message(&chat_id, &msg).await;
         }
 
         // Branch 2: Poll incoming messages
-        _ = sleep(Duration::from_secs(1)) => {
-            let messages = channel.receive_messages().await;
-            for msg in messages {
-                task_manager.schedule_task(msg.text).await;
+        _ = tokio::time::sleep(Duration::from_secs(1)) => {
+            match self.channel.receive_messages().await {
+                Ok(messages) => {
+                    for msg in messages {
+                        task_manager.schedule_task(msg.text).await;
+                        self.task_routes.insert(task_id, msg.chat_id.clone());
+                    }
+                }
             }
+        }
+
+        // Branch 3: Graceful shutdown
+        _ = shutdown_signal.notified() => {
+            self.save_routes().await;
+            break;
         }
     }
 }
@@ -70,7 +83,7 @@ loop {
 
 ## 2. TaskProcessor Coroutine
 
-**Location:** `src/main.rs` (lines 90-95)
+**Location:** `src/main.rs` (lines 72-75)
 
 ### Main Actor
 
@@ -166,6 +179,7 @@ sequenceDiagram
     participant P1 as Main Thread (Agent)
     participant P2 as TaskProcessor
     participant P3 as Channel Handler
+    participant P4 as Shutdown Thread
     participant External as External Systems
 
     rect rgb(31, 90, 88)
@@ -188,9 +202,11 @@ sequenceDiagram
     end
 
     rect rgb(90, 31, 31)
-        Note over P1, External: Graceful shutdown flow
-        External->>P3: SIGTERM (Ctrl+C)
-        P3->>P2: Notify shutdown signal (Arc<Notify>)
+        Note over P1, External: Graceful Shutdown Flow
+        External->>P4: SIGTERM (Ctrl+C)
+        P4->>P2: notify_waiters()
+        P4->>P3: notify_waiters()
+        P3->>P3: Save routing table to routes.json
         P2->>P2: Save pending tasks to tasks.json
         Note over P1, External: Application exits cleanly
     end
@@ -206,7 +222,7 @@ sequenceDiagram
 | **Task Execution**    | `mpsc::Task`        | 32   | TaskProcessor      | Agent (main)       | Queue tasks for AI processing  |
 | **Task Command**      | `mpsc::TaskCommand` | 100  | TaskManager (Arc)  | TaskProcessor      | Schedule/cancel/list tasks     |
 | **Task Control**      | `oneshot::Result`   | 1    | TaskProcessor      | TaskManager        | Async response for cancel/list |
-| **Shutdown Signal**   | `Arc<Notify>`       | N/A  | Telegram Coroutine | TaskProcessor      | Graceful shutdown coordination |
+| **Shutdown Signal**   | `Arc<Notify>`       | N/A  | Shutdown Coroutine | TaskProcessor, Channel Handler | Graceful shutdown coordination |
 
 ---
 
@@ -221,7 +237,7 @@ sequenceDiagram
 | **mpsc::Receiver<String> (channel_rx)** | Telegram Coroutine  | None                               | Exclusive ownership                                         |
 | **mpsc::Receiver<Task> (agent_rx)**     | Main Thread (Agent) | None                               | Exclusive ownership                                         |
 | **BinaryHeap<Task>**                    | TaskProcessor       | None                               | Exclusive ownership - task queue                            |
-| **shutdown_signal (Arc<Notify>)**       | Telegram Coroutine  | TaskProcessor                      | `Arc<Notify>` - Telegram triggers, TaskProcessor listens    |
+| **shutdown_signal (Arc<Notify>)**       | Shutdown Coroutine  | TaskProcessor, Channel Handler     | `Arc<Notify>` - Shutdown triggers, others listen            |
 
 ---
 
@@ -285,12 +301,13 @@ sequenceDiagram
 The application implements graceful shutdown using `Arc<Notify>` to coordinate between coroutines:
 
 ```
-1. User sends SIGTERM (Ctrl+C) → tokio::signal::ctrl_c() triggers in Telegram Coroutine
-2. Telegram Coroutine calls shutdown_signal_clone.notify_waiters()
+1. User sends SIGTERM (Ctrl+C) → tokio::signal::ctrl_c() triggers in Shutdown Coroutine
+2. Shutdown Coroutine calls shutdown_clone.notify_waiters()
 3. TaskProcessor receives shutdown signal via shutdown_signal.notified()
-4. TaskProcessor saves pending tasks to tasks.json
-5. Agent loop exits when channel closes
-6. Application exits cleanly
+4. Channel Handler receives shutdown signal via shutdown_signal.notified()
+5. TaskProcessor saves pending tasks to tasks.json
+6. Channel Handler saves routing table to routes.json
+7. Application loops exit, process stops cleanly
 ```
 
 ### Implementation Details
@@ -298,21 +315,21 @@ The application implements graceful shutdown using `Arc<Notify>` to coordinate b
 **In `src/main.rs`:**
 
 - Creates `shutdown_signal = Arc::new(Notify::new())`
-- Telegram coroutine listens for `tokio::signal::ctrl_c()` (lines 35-44)
+- Spawns a dedicated coroutine to listen for `tokio::signal::ctrl_c()` (lines 51-58)
 - On signal: logs message and calls `shutdown_clone.notify_waiters()`
-- Passes `shutdown_signal.clone()` to `task_processor.run()`
+- Passes `shutdown_signal.clone()` to both `task_processor.run()` and `channel_handler.start_listening()`
 
-**In `TaskProcessor::run()`:**
+**In `TaskProcessor::run()` and `ChannelHandler::start_listening()`:**
 
-- Uses `shutdown_signal.notified()` in `tokio::select!`
-- On shutdown: saves pending tasks to `tasks.json` before exiting
+- Both loop mechanisms use `shutdown_signal.notified()` inside `tokio::select!`
+- On shutdown trigger: state is persisted as JSON to the configuration directory before exiting the loop
 
 ### Shutdown Triggers
 
 | Trigger          | Source             | Handler                      | Action               |
 | ---------------- | ------------------ | ---------------------------- | -------------------- |
-| SIGTERM / Ctrl+C | Telegram Coroutine | `tokio::signal::ctrl_c()`    | Notify TaskProcessor |
-| Channel closed   | TaskProcessor      | `tokio::select!` else branch | Save tasks and exit  |
+| SIGTERM / Ctrl+C | Shutdown Coroutine | `tokio::signal::ctrl_c()`    | Broadcast `Notify` |
+| Channel closed   | Respective Loop    | `tokio::select!` else branch | Save state and exit  |
 
 ---
 

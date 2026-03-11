@@ -26,7 +26,7 @@ async fn main() {
     let channel = Arc::new(TelegramChannel::new(telegram_token));
 
     // Create task channel pair
-    let (task_manager, task_processor) = create_task_channel();
+    let (task_manager, task_processor) = create_task_channel().await;
     let task_manager = Arc::new(task_manager);
 
     // Create a single Agent instance (shared across all tasks, no cloning)

@@ -1,9 +1,10 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
+mod agent;
 mod embedding;
-mod r#impl;
 mod memory;
+mod message;
 mod skills;
 mod tools;
 

@@ -4,16 +4,16 @@
 
 This document details all coroutines spawned using `tokio::spawn`, their main actors, owned resources, and inter-corsosnt communication patterns.
 
-**Architecture Version:** 2.0 (Simplified - 2 coroutines, deadlock-safe)
+**Architecture Version:** 2.1 (Agent in Main Thread - 2 coroutines, deadlock-safe)
 
 ---
 
 ## All `tokio::spawn` Locations
 
-| #   | Location                                | Purpose                                      |
-| --- | --------------------------------------- | -------------------------------------------- |
-| 1   | `src/main.rs` (lines 35-72)             | **Unified Telegram** coroutine (poll + send) |
-| 2   | `src/tasks/task_manager.rs` (line 100+) | **Agent Worker** coroutine (avoids deadlock) |
+| #   | Location                    | Purpose                                       |
+| --- | --------------------------- | --------------------------------------------- |
+| 1   | `src/main.rs` (lines 35-72) | **Unified Telegram** coroutine (poll + send)  |
+| 2   | `src/main.rs` (lines 90-95) | **TaskProcessor** coroutine (avoids deadlock) |
 
 ---
 
@@ -37,11 +37,11 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 
 ### Communication Patterns
 
-| Direction    | Channel Type                                     | Purpose                                          |
-| ------------ | ------------------------------------------------ | ------------------------------------------------ |
-| **Incoming** | Telegram API (HTTP polling)                      | Polls `/getUpdates` every 1 second               |
-| **Incoming** | `mpsc::Receiver<String>` (rx)                    | Receives AI response messages from TaskProcessor |
-| **Outgoing** | Telegram API (via `channel_send.send_message()`) | Sends messages to hardcoded chat_id              |
+| Direction    | Channel Type                                     | Purpose                                  |
+| ------------ | ------------------------------------------------ | ---------------------------------------- |
+| **Incoming** | Telegram API (HTTP polling)                      | Polls `/getUpdates` every 1 second       |
+| **Incoming** | `mpsc::Receiver<String>` (rx)                    | Receives AI response messages from Agent |
+| **Outgoing** | Telegram API (via `channel_send.send_message()`) | Sends messages to hardcoded chat_id      |
 
 ### Loop Structure
 
@@ -55,7 +55,7 @@ loop {
 
         // Branch 2: Poll incoming messages
         _ = sleep(Duration::from_secs(1)) => {
-            let messages = channel_poll.receive_messages().await;
+            let messages = channel.receive_messages().await;
             for msg in messages {
                 task_manager.schedule_task(msg.text).await;
             }
@@ -68,61 +68,78 @@ loop {
 
 ---
 
-## 2. Agent Worker Coroutine
+## 2. TaskProcessor Coroutine
 
-**Location:** `src/tasks/task_manager.rs` (lines 100-110)
+**Location:** `src/main.rs` (lines 90-95)
 
 ### Main Actor
 
-- **Agent Task Executor** - A worker that processes tasks from the `agent_rx` channel
+- **Task Queue Manager** - Manages the task queue, deadline scheduling, and persistence
 
 ### Resources Owned
 
-| Resource          | Type                   | Ownership                                                            |
-| ----------------- | ---------------------- | -------------------------------------------------------------------- |
-| `Agent`           | `Agent` (owned)        | **Exclusive** - owns `messages: Vec<Message>` and `tools: Vec<Tool>` |
-| `agent_rx`        | `mpsc::Receiver<Task>` | **Exclusive**                                                        |
-| `channel_tx`      | `mpsc::Sender<String>` | **Exclusive** (sends to Telegram coroutine)                          |
-| `TaskManager`     | `Arc<TaskManager>`     | **Shared** (with Telegram coroutine for scheduling)                  |
-| `shutdown_signal` | `Arc<Notify>`          | **Shared** (with Telegram Coroutine)                                 |
+| Resource          | Type                          | Ownership                                                    |
+| ----------------- | ----------------------------- | ------------------------------------------------------------ |
+| `TaskProcessor`   | `TaskProcessor` (owned)       | **Exclusive** - owns `BinaryHeap<Task>` and `mpsc::Receiver` |
+| `task_rx`         | `mpsc::Receiver<TaskCommand>` | **Exclusive** (receives schedule/cancel/list commands)       |
+| `pending_tasks`   | `BinaryHeap<Task>`            | **Exclusive** (priority queue ordered by deadline)           |
+| `shutdown_signal` | `Arc<Notify>`                 | **Shared** (listens for shutdown from Telegram coroutine)    |
 
-**Note:** The Agent is **moved into** this coroutine, giving it exclusive ownership of:
-
-- `messages: Vec<Message>` - conversation history (preserved across all tasks)
-- `tools: Vec<Tool>` - available tool functions
-- `api_url`, `api_key`, `model` - LLM configuration
-- `client: Client` - HTTP client for API calls
+**Note:** The TaskProcessor runs in a **separate coroutine** to allow the Agent (in main thread) to use tools like `schedule_task` without deadlock.
 
 ### Communication Patterns
 
-| Direction    | Channel Type                        | Purpose                                  |
-| ------------ | ----------------------------------- | ---------------------------------------- |
-| **Incoming** | `mpsc::Receiver<Task>` (agent_rx)   | Receives tasks from TaskProcessor        |
-| **Outgoing** | `mpsc::Sender<String>` (channel_tx) | Sends AI responses to Telegram coroutine |
-| **Internal** | `Agent::send_message()` → API calls | Makes HTTP requests to LLM API           |
+| Direction    | Channel Type                    | Purpose                                  |
+| ------------ | ------------------------------- | ---------------------------------------- |
+| **Incoming** | `mpsc::Receiver<TaskCommand>`   | Receives schedule/cancel/list commands   |
+| **Outgoing** | `mpsc::Sender<Task>` (agent_tx) | Sends ready tasks to Agent (main thread) |
+| **Internal** | `BinaryHeap` operations         | Manages task queue by deadline priority  |
 
 ### Loop Structure
 
 ```rust
-while let Some(task) = agent_rx.recv().await {
-    log::info!("Executing task {}", task.id);
-    let response = agent.send_message(task.payload).await;
-    channel_tx.send(response).await.expect("Failed to send to channel");
+loop {
+    tokio::select! {
+        // Branch 1: Task command arrives
+        Some(msg) = self.task_rx.recv() => {
+            match msg {
+                TaskCommand::Schedule(task) => self.pending_tasks.push(task),
+                TaskCommand::Cancel(task_id, reply_tx) => { /* remove task */ },
+                TaskCommand::ListTasks(reply_tx) => { /* return tasks */ },
+            }
+        }
+
+        // Branch 2: Timer fires (deadline reached)
+        _ = sleep(sleep_duration) => {
+            while let Some(task) = self.pending_tasks.peek() {
+                if task.is_ready() {
+                    let task = self.pending_tasks.pop().unwrap();
+                    agent_tx.send(task).await;
+                }
+            }
+        }
+
+        // Branch 3: Shutdown signal
+        _ = shutdown_signal.notified() => {
+            self.save_tasks().await;
+            break;
+        }
+    }
 }
 ```
 
-**Lifecycle:** Runs until the TaskProcessor exits (main loop breaks)
+**Lifecycle:** Runs until shutdown signal received or channel closed
 
 ---
 
-## Critical Design Decision: Why Agent Must Run in a Separate Coroutine
+## Critical Design Decision: Why TaskProcessor Must Run in a Separate Coroutine
 
 ### The Deadlock Problem
 
-If the Agent were on the **same thread** as TaskProcessor, a **deadlock** would occur when the Agent uses tools that call back to TaskManager:
+If the TaskProcessor were on the **same thread** as the Agent (main thread), a **deadlock** would occur when the Agent uses tools that call back to TaskManager:
 
 ```
-1. TaskProcessor sends task → Agent starts executing (on same thread)
+1. TaskProcessor sends task → Agent starts executing (on main thread)
 2. Agent uses schedule_task tool → sends to TaskManager → TaskProcessor channel
 3. TaskProcessor is BLOCKED waiting for Agent to finish
 4. Agent is BLOCKED waiting for TaskProcessor to schedule new task
@@ -131,13 +148,13 @@ If the Agent were on the **same thread** as TaskProcessor, a **deadlock** would 
 
 ### The Solution
 
-By running the Agent in a **separate coroutine** (`tokio::spawn`):
+By running the **TaskProcessor in a separate coroutine** (`tokio::spawn`):
 
-- TaskProcessor and Agent can proceed **concurrently**
-- When Agent uses tools like `schedule_task`, `cancel_task`, or `list_tasks`, it can send messages to TaskProcessor without blocking itself
+- Agent (main thread) and TaskProcessor can proceed **concurrently**
+- When Agent uses tools like `schedule_task`, `cancel_task`, or `list_tasks`, it can send messages to TaskProcessor without blocking
 - TaskProcessor can process these messages while Agent continues executing
 
-This is a critical design decision that ensures the system remains responsive and deadlock-free.
+This allows the Agent to stay in the main thread (keeping `!Send` state local) while avoiding deadlocks.
 
 ---
 
@@ -146,35 +163,36 @@ This is a critical design decision that ensures the system remains responsive an
 ```mermaid
 sequenceDiagram
     autonumber
-    participant P1 as Main Thread (TaskProcessor)
-    participant P2 as Agent Worker
-    participant P3 as Unified Telegram Coroutine
+    participant P1 as Main Thread (Agent)
+    participant P2 as TaskProcessor
+    participant P3 as Channel Handler
     participant External as External Systems
 
     rect rgb(31, 90, 88)
         Note over P1, External: User task flow
-        P3->>P1: Schedule immediate task (via TaskManager)
-        P1->>P2: Dispatch task (via agent_tx)
-        P2->>P2: Execute task (Agent.send_message)
-        P2->>P3: Send response (via channel_tx)
+        External->>P3: User message
+        P3->>P2: Schedule immediate task (via TaskManager)
+        P2->>P1: Dispatch task (via agent_tx)
+        P1->>P1: Execute task (Agent.send_message)
+        P1->>P3: Send response (via channel_tx)
         P3->>External: Forward to Telegram
     end
 
     rect rgb(41, 101, 50)
         Note over P1, External: Scheduled task flow
-        P1->>P1: Deadline reached
-        P1->>P2: Dispatch task (via agent_tx)
-        P2->>P2: Execute task
-        P2->>P3: Send response (via channel_tx)
+        P2->>P2: Deadline reached
+        P2->>P1: Dispatch task (via agent_tx)
+        P1->>P1: Execute task
+        P1->>P3: Send response (via channel_tx)
         P3->>External: Forward to Telegram
     end
 
     rect rgb(90, 31, 31)
         Note over P1, External: Graceful shutdown flow
         External->>P3: SIGTERM (Ctrl+C)
-        P3->>P1: Notify shutdown signal (Arc<Notify>)
-        P1->>P1: Save pending tasks to tasks.json
-        Note right of P1: Application exits cleanly
+        P3->>P2: Notify shutdown signal (Arc<Notify>)
+        P2->>P2: Save pending tasks to tasks.json
+        Note over P1, External: Application exits cleanly
     end
 ```
 
@@ -184,8 +202,8 @@ sequenceDiagram
 
 | Channel               | Type                | Size | Sender             | Receiver           | Purpose                        |
 | --------------------- | ------------------- | ---- | ------------------ | ------------------ | ------------------------------ |
-| **Outgoing Messages** | `mpsc::String`      | 16   | TaskProcessor      | Telegram Coroutine | Send AI responses to Telegram  |
-| **Task Execution**    | `mpsc::Task`        | 32   | TaskProcessor      | Agent Worker       | Queue tasks for AI processing  |
+| **Outgoing Messages** | `mpsc::String`      | 16   | Agent (main)       | Telegram Coroutine | Send AI responses to Telegram  |
+| **Task Execution**    | `mpsc::Task`        | 32   | TaskProcessor      | Agent (main)       | Queue tasks for AI processing  |
 | **Task Command**      | `mpsc::TaskCommand` | 100  | TaskManager (Arc)  | TaskProcessor      | Schedule/cancel/list tasks     |
 | **Task Control**      | `oneshot::Result`   | 1    | TaskProcessor      | TaskManager        | Async response for cancel/list |
 | **Shutdown Signal**   | `Arc<Notify>`       | N/A  | Telegram Coroutine | TaskProcessor      | Graceful shutdown coordination |
@@ -194,16 +212,16 @@ sequenceDiagram
 
 ## Resource Ownership Matrix
 
-| Resource                                | Owner                | Shared With                        | Access Pattern                                              |
-| --------------------------------------- | -------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| **TelegramChannel**                     | Telegram Coroutine   | None (Arc clones within coroutine) | `Arc<TelegramChannel>` - concurrent read-only access        |
-| **Agent (messages, tools)**             | Agent Worker (#2)    | None                               | Exclusive ownership - single owner prevents race conditions |
-| **TaskManager**                         | TaskProcessor (main) | Telegram Coroutine, Agent Worker   | `Arc<TaskManager>` - concurrent access via channel          |
-| **mpsc::Sender<String> (channel_tx)**   | Telegram Coroutine   | None                               | Exclusive ownership                                         |
-| **mpsc::Receiver<String> (channel_rx)** | Telegram Coroutine   | None                               | Exclusive ownership                                         |
-| **mpsc::Receiver<Task> (agent_rx)**     | Agent Worker (#2)    | None                               | Exclusive ownership                                         |
-| **BinaryHeap<Task>**                    | TaskProcessor (main) | None                               | Exclusive ownership - task queue                            |
-| **shutdown_signal (Arc<Notify>)**       | Telegram Coroutine   | TaskProcessor                      | `Arc<Notify>` - Telegram triggers, TaskProcessor listens    |
+| Resource                                | Owner               | Shared With                        | Access Pattern                                              |
+| --------------------------------------- | ------------------- | ---------------------------------- | ----------------------------------------------------------- |
+| **TelegramChannel**                     | Telegram Coroutine  | None (Arc clones within coroutine) | `Arc<TelegramChannel>` - concurrent read-only access        |
+| **Agent (messages, tools)**             | Main Thread (Agent) | None                               | Exclusive ownership - single owner prevents race conditions |
+| **TaskManager**                         | Main (Arc)          | Telegram Coroutine, Agent          | `Arc<TaskManager>` - concurrent access via channel          |
+| **mpsc::Sender<String> (channel_tx)**   | Main Thread (Agent) | None                               | Exclusive ownership                                         |
+| **mpsc::Receiver<String> (channel_rx)** | Telegram Coroutine  | None                               | Exclusive ownership                                         |
+| **mpsc::Receiver<Task> (agent_rx)**     | Main Thread (Agent) | None                               | Exclusive ownership                                         |
+| **BinaryHeap<Task>**                    | TaskProcessor       | None                               | Exclusive ownership - task queue                            |
+| **shutdown_signal (Arc<Notify>)**       | Telegram Coroutine  | TaskProcessor                      | `Arc<Notify>` - Telegram triggers, TaskProcessor listens    |
 
 ---
 
@@ -211,7 +229,7 @@ sequenceDiagram
 
 ### 1. **Exclusive Ownership for Mutable State**
 
-- **Agent** is owned exclusively by Agent Worker (#2), preventing concurrent access to `messages: Vec<Message>` and `tools: Vec<Tool>`
+- **Agent** is owned by the main thread, preventing concurrent access to `messages: Vec<Message>` and `tools: Vec<Tool>`
 - This ensures conversation history integrity across all task executions
 
 ### 2. **Unified Coroutine via tokio::select!**
@@ -220,9 +238,9 @@ sequenceDiagram
 - `tokio::select!` allows concurrent handling of both incoming and outgoing messages
 - Eliminates the need for an intermediate `mpsc::String` channel between sender and poller
 
-### 3. **Separate Agent Coroutine (Deadlock Prevention)**
+### 3. **TaskProcessor in Separate Coroutine (Deadlock Prevention)**
 
-- Agent runs in a **separate coroutine** from TaskProcessor
+- TaskProcessor runs in a **separate coroutine** from the Agent (main thread)
 - When Agent uses tools (schedule_task, cancel_task, list_tasks), it can call back to TaskManager without causing deadlock
 - This is a critical design decision for system correctness
 
@@ -241,9 +259,9 @@ sequenceDiagram
 
 ## Critical Observations
 
-1. **No Race Conditions on Agent State**: The Agent is **exclusively owned** by Agent Worker (#2), ensuring `messages: Vec<Message>` is never accessed concurrently.
+1. **No Race Conditions on Agent State**: The Agent is **owned by the main thread**, ensuring `messages: Vec<Message>` is never accessed concurrently.
 
-2. **Deadlock-Free Design**: The separate Agent coroutine prevents deadlocks when tools call back to TaskManager. This is a critical design decision.
+2. **Deadlock-Free Design**: The separate TaskProcessor coroutine prevents deadlocks when Agent tools call back to TaskManager. This is a critical design decision.
 
 3. **Simplified Telegram Handling**: Merging polling and sending into one coroutine reduces complexity and eliminates one hop in the message chain.
 
@@ -256,7 +274,7 @@ sequenceDiagram
 
 6. **Error Handling**:
    - Telegram coroutine logs errors but continues polling
-   - Agent Worker panics on channel errors (expected behavior - indicates system shutdown)
+   - Agent panics on channel errors (expected behavior - indicates system shutdown)
 
 ---
 
@@ -271,7 +289,8 @@ The application implements graceful shutdown using `Arc<Notify>` to coordinate b
 2. Telegram Coroutine calls shutdown_signal_clone.notify_waiters()
 3. TaskProcessor receives shutdown signal via shutdown_signal.notified()
 4. TaskProcessor saves pending tasks to tasks.json
-5. Application exits cleanly
+5. Agent loop exits when channel closes
+6. Application exits cleanly
 ```
 
 ### Implementation Details
@@ -279,14 +298,13 @@ The application implements graceful shutdown using `Arc<Notify>` to coordinate b
 **In `src/main.rs`:**
 
 - Creates `shutdown_signal = Arc::new(Notify::new())`
-- Telegram coroutine listens for `tokio::signal::ctrl_c()` (lines 67-72)
-- On signal: logs message and calls `shutdown_signal_clone.notify_waiters()`
+- Telegram coroutine listens for `tokio::signal::ctrl_c()` (lines 35-44)
+- On signal: logs message and calls `shutdown_clone.notify_waiters()`
 - Passes `shutdown_signal.clone()` to `task_processor.run()`
 
-**In `src/tasks/task_manager.rs`:**
+**In `TaskProcessor::run()`:**
 
-- `TaskProcessor::run()` receives `shutdown_signal: Arc<Notify>` parameter
-- Uses `shutdown_signal.notified()` in `tokio::select!` (lines 187-194)
+- Uses `shutdown_signal.notified()` in `tokio::select!`
 - On shutdown: saves pending tasks to `tasks.json` before exiting
 
 ### Shutdown Triggers
@@ -312,16 +330,27 @@ Telegram Poller → TaskManager → TaskProcessor → Agent Worker → Telegram 
 - Unnecessary `mpsc::String` channel between TaskProcessor and Telegram Sender
 - Agent Worker coroutine added complexity without benefit
 
-### Version 2.0 (Simplified - 2 Coroutines, Deadlock-Safe)
+### Version 2.0 (Simplified - Agent in Worker Coroutine)
 
 ```
 Telegram Coroutine (poll + send) ←→ TaskProcessor → Agent Worker → Telegram Coroutine
 ```
 
+**Issues:**
+
+- Agent in separate coroutine, TaskProcessor in main thread
+- Deadlock risk when Agent uses tools that call back to TaskManager
+
+### Version 2.1 (Agent in Main Thread - Deadlock-Safe)
+
+```
+Telegram Coroutine (poll + send) ←→ Agent (main) ←→ TaskProcessor (spawned)
+```
+
 **Benefits:**
 
-- Direct communication: TaskProcessor → Telegram coroutine (via Agent Worker)
-- Agent stays in separate coroutine (avoids deadlock when using tools)
-- One fewer coroutine to manage (Telegram sender + poller merged)
+- Agent in main thread keeps `!Send` state local
+- TaskProcessor in separate coroutine allows concurrent tool calls
+- Direct communication: Agent → Telegram coroutine (via channel_tx)
 - Simpler mental model
 - **Crucially: No deadlocks when Agent uses tools**

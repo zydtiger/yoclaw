@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+mod handler;
 pub mod telegram;
 
 /// A generic message received from any channel.
@@ -36,4 +37,9 @@ pub trait Channel: Send + Sync {
         message_id: i64,
         emoji: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Handler for channel listening.
+pub struct ChannelHandler {
+    channel: Box<dyn Channel>,
 }

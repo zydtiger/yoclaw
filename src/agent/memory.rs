@@ -2,9 +2,9 @@ use super::MemoryStore;
 use rusqlite::{params, Connection, Result};
 
 impl MemoryStore {
-    /// Creates a new MemoryStore connected to the given database path.
+    /// Creates a new MemoryStore connected to the given database name.
     /// If an empty string or ":memory:" is provided, it creates an in-memory database.
-    pub fn new(db_path: &str) -> Result<Self> {
+    pub fn new(db_name: &str) -> Result<Self> {
         // Register the sqlite-vec extension for future connections
         unsafe {
             rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
@@ -12,9 +12,10 @@ impl MemoryStore {
             )));
         }
 
-        let conn = if db_path.is_empty() || db_path == ":memory:" {
+        let conn = if db_name.is_empty() || db_name == ":memory:" {
             Connection::open_in_memory()?
         } else {
+            let db_path = std::path::PathBuf::from(&*crate::globals::CONFIG_DIR).join(db_name);
             Connection::open(db_path)?
         };
 

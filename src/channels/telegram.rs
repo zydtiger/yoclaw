@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,6 +26,7 @@ struct TelegramMessage {
     from: Option<TelegramPeer>,
     chat: TelegramPeer,
     text: Option<String>,
+    message_id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +56,7 @@ impl TelegramChannel {
     }
 }
 
+#[async_trait]
 impl Channel for TelegramChannel {
     async fn send_message(
         &self,
@@ -154,6 +157,7 @@ impl Channel for TelegramChannel {
                     let sender_name = msg.from.as_ref().and_then(|f| f.name.clone());
                     let sender_id = msg.from.map(|f| f.id.to_string()).unwrap_or_default();
                     let chat_id = msg.chat.id.to_string();
+                    let message_id = msg.message_id;
 
                     messages.push(ChannelMessage {
                         channel_id: "telegram".to_string(),
@@ -161,6 +165,7 @@ impl Channel for TelegramChannel {
                         sender_id,
                         sender_name,
                         text,
+                        message_id,
                     });
                 }
             }
@@ -171,5 +176,44 @@ impl Channel for TelegramChannel {
             .store(highest_update_id, Ordering::SeqCst);
 
         Ok(messages)
+    }
+
+    async fn react_with_emoji(
+        &self,
+        chat_id: &str,
+        message_id: i64,
+        emoji: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = self.api_url("setMessageReaction");
+
+        let req_body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reaction": [
+                {
+                    "type": "emoji",
+                    "emoji": emoji
+                }
+            ]
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&req_body)
+            .send()
+            .await?
+            .json::<TelegramResponse<serde_json::Value>>()
+            .await?;
+
+        if !response.ok {
+            return Err(format!(
+                "Telegram API error adding reaction: {:?}",
+                response.description
+            )
+            .into());
+        }
+
+        Ok(())
     }
 }

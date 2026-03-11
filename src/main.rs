@@ -80,6 +80,10 @@ async fn main() {
                                 match task_manager.schedule_task(msg.text).await {
                                     Ok(task_id) => {
                                         log::info!("Scheduled task #{} for incoming message", task_id);
+                                        match channel.react_with_emoji(&msg.chat_id, msg.message_id, "👍").await {
+                                            Ok(()) => log::info!("Successfully reacted to user message"),
+                                            Err(e) => log::error!("Failed to respond: {}", e),
+                                        };
                                     }
                                     Err(e) => {
                                         log::error!("Failed to schedule task for incoming message: {}", e);

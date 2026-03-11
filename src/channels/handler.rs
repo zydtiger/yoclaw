@@ -82,12 +82,20 @@ impl ChannelHandler {
                                     msg.chat_id,
                                     msg.text
                                 );
-                                if !self.allowed_users.contains(&msg.sender_id) && !self.allowed_users.is_empty() {
-                                    log::info!("Ignoring message from unauthorized user: {} ({})", msg.sender_id, msg.sender_name.unwrap_or_default());
-                                    continue;
-                                }
-                                if self.allowed_users.is_empty() {
-                                    log::info!("Ignoring message because no users are allowed.");
+                                let is_unauthorized = !self.allowed_users.is_empty() && !self.allowed_users.contains(&msg.sender_id);
+                                let is_empty = self.allowed_users.is_empty();
+
+                                if is_unauthorized || is_empty {
+                                    if is_empty {
+                                        log::info!("Ignoring message because no users are allowed.");
+                                    } else {
+                                        log::info!("Ignoring message from unauthorized user: {} ({})", msg.sender_id, msg.sender_name.clone().unwrap_or_default());
+                                    }
+
+                                    // Send a warning back to the unauthorized user
+                                    if let Err(e) = self.channel.send_message(&msg.chat_id, "⚠️ You are not allowed to access this bot").await {
+                                        log::error!("Failed to send blocked warning message to Telegram: {}", e);
+                                    }
                                     continue;
                                 }
 

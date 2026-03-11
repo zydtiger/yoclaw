@@ -66,6 +66,7 @@ async fn main() {
     let (channel_tx, channel_rx) = mpsc::channel::<(crate::tasks::TaskId, String)>(16);
     let handler_shutdown_signal = shutdown_signal.clone();
     tokio::spawn(async move {
+        log::info!("ChannelHandler started - waiting for messages...");
         channel_handler
             .start_listening(channel_rx, task_manager, handler_shutdown_signal)
             .await;

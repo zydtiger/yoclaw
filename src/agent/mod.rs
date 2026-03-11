@@ -98,13 +98,15 @@ pub struct Message {
 /// Agent struct
 #[derive(Debug)]
 pub struct Agent {
+    // Core LLM related
     pub api_url: Url,
     pub api_key: String,
     pub model: String,
     pub debug_mode: bool,
-    pub environment: std::collections::HashMap<String, String>,
 
-    /// Self managed
+    // Tool call related
+    pub environment: std::collections::HashMap<String, String>,
+    pub skill_store: crate::agent::skills::SkillStore,
     pub tools: Vec<Tool>,
     pub client: Client,
     pub messages: Vec<Message>,

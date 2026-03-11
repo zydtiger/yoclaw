@@ -28,6 +28,8 @@ pub struct Config {
     pub agent: AgentConfig,
     pub embedding: EmbeddingConfig,
     pub channels: ChannelsConfig,
+    #[serde(default)]
+    pub environment: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug)]

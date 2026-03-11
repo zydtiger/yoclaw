@@ -4,7 +4,7 @@ use tokio::fs;
 use super::{Skill, SkillMetadata, SkillStore};
 
 impl Skill {
-    pub fn parse(content: &str, default_name: String) -> Self {
+    pub fn parse(content: &str, default_name: String, base_dir: String) -> Self {
         let mut name = default_name;
         let mut description = None;
         let mut version = None;
@@ -51,6 +51,7 @@ impl Skill {
                 version,
             },
             contents,
+            base_dir,
         }
     }
 }
@@ -94,7 +95,8 @@ impl SkillStore {
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
-                            store.skills.push(Skill::parse(&raw_contents, default_name));
+                            let base_dir = path.to_string_lossy().to_string();
+                            store.skills.push(Skill::parse(&raw_contents, default_name, base_dir));
                         }
                     }
                 }
@@ -106,7 +108,8 @@ impl SkillStore {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                store.skills.push(Skill::parse(&raw_contents, default_name));
+                let base_dir = path.parent().unwrap_or(Path::new("")).to_string_lossy().to_string();
+                store.skills.push(Skill::parse(&raw_contents, default_name, base_dir));
             }
         }
 
@@ -121,7 +124,7 @@ impl SkillStore {
 
         let mut combined_skills = String::from("<skills>\n");
         for skill in &self.skills {
-            combined_skills.push_str(&format!("<skill name=\"{}\"", skill.metadata.name));
+            combined_skills.push_str(&format!("<skill name=\"{}\" base_dir=\"{}\"", skill.metadata.name, skill.base_dir));
 
             if let Some(desc) = &skill.metadata.description {
                 combined_skills.push_str(&format!(" description=\"{}\"", desc));
@@ -135,5 +138,10 @@ impl SkillStore {
         combined_skills.push_str("</skills>");
 
         combined_skills
+    }
+
+    /// Fetches a skill by its name
+    pub fn get_skill(&self, name: &str) -> Option<&Skill> {
+        self.skills.iter().find(|s| s.metadata.name == name)
     }
 }

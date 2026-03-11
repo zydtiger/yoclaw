@@ -11,6 +11,7 @@ pub struct SkillMetadata {
 pub struct Skill {
     pub metadata: SkillMetadata,
     pub contents: String,
+    pub base_dir: String,
 }
 
 #[derive(Debug, Default)]

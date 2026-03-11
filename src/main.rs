@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use crate::agent::Agent;
 use crate::channels::telegram::TelegramChannel;
@@ -26,12 +25,24 @@ async fn main() {
     let channel = Arc::new(TelegramChannel::new(telegram_token));
 
     // Create task channel pair
-    let (task_manager, task_processor) = create_task_channel();
+    let (task_manager, task_processor) = create_task_channel().await;
     let task_manager = Arc::new(task_manager);
 
     // Create a single Agent instance (shared across all tasks, no cloning)
     let agent =
         Agent::new(&config.agent, task_manager.clone()).expect("Failed to initialize Agent");
+
+    // Set up signal handler for graceful shutdown
+    let shutdown_signal = Arc::new(Notify::new());
+    let shutdown_clone = shutdown_signal.clone();
+    tokio::spawn(async move {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            log::error!("Failed to listen for Ctrl+C: {}", e);
+        } else {
+            log::info!("Received shutdown signal (Ctrl+C/SIGTERM)");
+            shutdown_clone.notify_waiters();
+        }
+    });
 
     // Spawn unified Telegram coroutine - handles both polling and sending
     let (channel_tx, mut channel_rx) = mpsc::channel::<String>(16);
@@ -82,5 +93,6 @@ async fn main() {
     // Main loop: TaskProcessor runs in main process with Agent
     // This processes tasks one-by-one, preserving chat history across all tasks
     log::info!("TaskProcessor started - waiting for tasks...");
-    task_processor.run(agent, channel_tx).await;
+    task_processor.run(agent, channel_tx, shutdown_signal).await;
+    log::info!("Application shutdown complete");
 }

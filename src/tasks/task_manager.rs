@@ -2,9 +2,10 @@ use chrono::Duration;
 use chrono::Utc;
 use std::collections::BinaryHeap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::time::sleep;
 
 use super::{CancelError, Task, TaskCommand, TaskId, TaskSaveError};
@@ -116,7 +117,7 @@ impl TaskProcessor {
         }
     }
 
-    /// Run the task processor loop in the main process.
+    /// Run the task processor loop in the main process with signal handling.
     ///
     /// IMPORTANT: Agent MUST run in a SEPARATE coroutine (tokio::spawn) to avoid deadlock.
     ///
@@ -131,7 +132,12 @@ impl TaskProcessor {
     /// 5. DEADLOCK!
     ///
     /// By running Agent in a separate coroutine, both can proceed concurrently.
-    pub async fn run(mut self, mut agent: crate::agent::Agent, channel_tx: mpsc::Sender<String>) {
+    pub async fn run(
+        mut self,
+        mut agent: crate::agent::Agent,
+        channel_tx: mpsc::Sender<String>,
+        shutdown_signal: Arc<Notify>,
+    ) {
         // Agent worker in SEPARATE coroutine - avoids deadlock when Agent uses tools
         // that call back to TaskManager (schedule_task, cancel_task, list_tasks)
         let (agent_tx, mut agent_rx) = mpsc::channel::<Task>(32);
@@ -210,7 +216,19 @@ impl TaskProcessor {
                     }
                 },
 
-                // Branch 3: Channel closed (graceful shutdown)
+                // Branch 3: Graceful shutdown when SIGTERM is received
+                _ = shutdown_signal.notified() => {
+                    log::info!("Shutdown requested, saving {} pending task(s)", self.pending_tasks.len());
+                    let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
+                    if let Err(e) = Self::save_tasks(&pending).await {
+                        log::error!("Failed to save pending tasks: {}", e);
+                    } else {
+                        log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
+                    }
+                    break;
+                }
+
+                // Branch 4: Channel closed (graceful shutdown)
                 else => {
                     log::info!("TaskProcessor shutting down, saving {} pending task(s)", self.pending_tasks.len());
                     // Save pending tasks before exiting

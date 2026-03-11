@@ -27,7 +27,6 @@ pub async fn generic_shell(
         Some(cmd) => cmd.to_string(),
         None => return "Error: 'command' field missing or not a string".to_string(),
     };
-    log::info!("Executing command: {}", command);
 
     // Split the command into program and arguments
     let parts: Vec<&str> = command.split_whitespace().collect();
@@ -41,12 +40,13 @@ pub async fn generic_shell(
     // Execute the program directly with its arguments
     let mut cmd = tokio::process::Command::new(program);
     cmd.envs(environment).args(cmd_args);
-    
+
     if let Some(cwd) = args.pointer("/cwd").and_then(|v| v.as_str()) {
         log::info!("Setting working directory to: {}", cwd);
         cmd.current_dir(cwd);
     }
-    
+
+    log::info!("Executing command: {}", command);
     let output = match cmd.output().await {
         Ok(output) => output,
         Err(e) => return format!("Error executing command: {}", e),
@@ -78,10 +78,7 @@ pub async fn generic_shell(
 }
 
 /// Retrieves the raw contents of a loaded skill by name.
-pub async fn use_skill(
-    args: Value,
-    skill_store: &crate::agent::skills::SkillStore,
-) -> String {
+pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillStore) -> String {
     let args = if let Some(inner_str) = args.as_str() {
         match serde_json::from_str::<Value>(inner_str) {
             Ok(v) => v,
@@ -103,7 +100,10 @@ pub async fn use_skill(
             "Skill contents for '{}':\n\n{}\n\nBase directory: {}",
             name, skill.contents, skill.base_dir
         ),
-        None => format!("Error: Skill '{}' not found in the skill metadata list.", name),
+        None => format!(
+            "Error: Skill '{}' not found in the skill metadata list.",
+            name
+        ),
     }
 }
 

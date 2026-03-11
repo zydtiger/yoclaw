@@ -32,7 +32,7 @@ impl MemoryStore {
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
                 embedding float[1536] distance_metric=cosine
-            )",
+            )", // TODO: make embedding dim configurable
             [],
         )?;
 

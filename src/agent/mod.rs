@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 mod r#impl;
 mod memory;
+mod embedding;
 mod tools;
 
 use tools::{Tool, ToolCall};
@@ -111,4 +112,13 @@ pub struct Agent {
 /// Memory store struct for vector database
 pub struct MemoryStore {
     conn: rusqlite::Connection,
+}
+
+/// Embedding client
+#[derive(Debug, Clone)]
+pub struct Embedding {
+    pub api_url: Url,
+    pub api_key: String,
+    pub model: String,
+    pub client: Client,
 }

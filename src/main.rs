@@ -35,7 +35,7 @@ async fn main() {
         agent::Embedding::new(&config.embedding).expect("Failed to initialize Embedding");
 
     // Create a single Agent instance (shared across all tasks, no cloning)
-    let agent = Agent::new(&config.agent, task_manager.clone(), memory_store, embedding)
+    let mut agent = Agent::new(&config.agent, task_manager.clone(), memory_store, embedding)
         .expect("Failed to initialize Agent");
 
     // Set up signal handler for graceful shutdown
@@ -96,9 +96,26 @@ async fn main() {
         }
     });
 
-    // Main loop: TaskProcessor runs in main process with Agent
-    // This processes tasks one-by-one, preserving chat history across all tasks
-    log::info!("TaskProcessor started - waiting for tasks...");
-    task_processor.run(agent, channel_tx, shutdown_signal).await;
+    // Create channel for sending tasks from processor to agent
+    let (agent_tx, mut agent_rx) = mpsc::channel::<crate::tasks::Task>(32);
+
+    // Spawn TaskProcessor in a separate coroutine to avoid deadlocks
+    tokio::spawn(async move {
+        log::info!("TaskProcessor started - waiting for tasks...");
+        task_processor.run(agent_tx, shutdown_signal).await;
+    });
+
+    // Main loop: Agent runs in main process handling tasks
+    // This processes tasks one-by-one, allowing !Send objects to stay safely on this thread
+    log::info!("Agent loop started - waiting for tasks...");
+    while let Some(task) = agent_rx.recv().await {
+        log::info!("Executing task {}", task.id);
+        let response = agent.send_message(task.payload).await;
+        channel_tx
+            .send(response)
+            .await
+            .expect("Failed to send to channel");
+    }
+
     log::info!("Application shutdown complete");
 }

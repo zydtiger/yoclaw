@@ -1,10 +1,10 @@
 use std::path::Path;
 use tokio::fs;
 
-use super::{Skill, SkillMetadata, SkillStore};
+use super::{Skill, SkillStore};
 
 impl Skill {
-    pub fn parse(content: &str, default_name: String, base_dir: String) -> Self {
+    pub fn parse(content: &str, default_name: String, path: String) -> Self {
         let mut name = default_name;
         let mut description = None;
         let mut version = None;
@@ -42,16 +42,11 @@ impl Skill {
             }
         }
 
-        let contents = lines.collect::<Vec<&str>>().join("\n");
-
         Self {
-            metadata: SkillMetadata {
-                name,
-                description,
-                version,
-            },
-            contents,
-            base_dir,
+            name,
+            description,
+            version,
+            path,
         }
     }
 }
@@ -95,8 +90,12 @@ impl SkillStore {
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
-                            let base_dir = path.to_string_lossy().to_string();
-                            store.skills.push(Skill::parse(&raw_contents, default_name, base_dir));
+                            let skill_path = path.to_string_lossy().to_string();
+                            store.skills.push(Skill::parse(
+                                &raw_contents,
+                                default_name,
+                                skill_path,
+                            ));
                         }
                     }
                 }
@@ -108,8 +107,10 @@ impl SkillStore {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                let base_dir = path.parent().unwrap_or(Path::new("")).to_string_lossy().to_string();
-                store.skills.push(Skill::parse(&raw_contents, default_name, base_dir));
+                let skill_path = path.to_string_lossy().to_string();
+                store
+                    .skills
+                    .push(Skill::parse(&raw_contents, default_name, skill_path));
             }
         }
 
@@ -124,12 +125,15 @@ impl SkillStore {
 
         let mut combined_skills = String::from("<skills>\n");
         for skill in &self.skills {
-            combined_skills.push_str(&format!("<skill name=\"{}\" base_dir=\"{}\"", skill.metadata.name, skill.base_dir));
+            combined_skills.push_str(&format!(
+                "<skill name=\"{}\" path=\"{}\"",
+                skill.name, skill.path
+            ));
 
-            if let Some(desc) = &skill.metadata.description {
+            if let Some(desc) = &skill.description {
                 combined_skills.push_str(&format!(" description=\"{}\"", desc));
             }
-            if let Some(ver) = &skill.metadata.version {
+            if let Some(ver) = &skill.version {
                 combined_skills.push_str(&format!(" version=\"{}\"", ver));
             }
 
@@ -142,6 +146,6 @@ impl SkillStore {
 
     /// Fetches a skill by its name
     pub fn get_skill(&self, name: &str) -> Option<&Skill> {
-        self.skills.iter().find(|s| s.metadata.name == name)
+        self.skills.iter().find(|s| s.name == name)
     }
 }

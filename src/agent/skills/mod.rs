@@ -1,17 +1,11 @@
 pub mod store;
 
 #[derive(Debug, Clone)]
-pub struct SkillMetadata {
+pub struct Skill {
     pub name: String,
     pub description: Option<String>,
     pub version: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Skill {
-    pub metadata: SkillMetadata,
-    pub contents: String,
-    pub base_dir: String,
+    pub path: String,
 }
 
 #[derive(Debug, Default)]

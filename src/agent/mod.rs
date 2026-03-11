@@ -1,9 +1,9 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
+mod embedding;
 mod r#impl;
 mod memory;
-mod embedding;
 mod tools;
 
 use tools::{Tool, ToolCall};
@@ -95,7 +95,7 @@ pub struct Message {
 }
 
 /// Agent struct
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Agent {
     pub api_url: Url,
     pub api_key: String,
@@ -107,15 +107,18 @@ pub struct Agent {
     pub client: Client,
     pub messages: Vec<Message>,
     pub task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+    pub memory_store: MemoryStore,
+    pub embedding: Embedding,
 }
 
 /// Memory store struct for vector database
+#[derive(Debug)]
 pub struct MemoryStore {
     conn: rusqlite::Connection,
 }
 
 /// Embedding client
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Embedding {
     pub api_url: Url,
     pub api_key: String,

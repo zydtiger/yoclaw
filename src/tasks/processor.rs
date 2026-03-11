@@ -1,84 +1,13 @@
-use chrono::Duration;
 use chrono::Utc;
 use std::collections::BinaryHeap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, Notify};
 use tokio::time::sleep;
 
-use super::{CancelError, Task, TaskCommand, TaskId, TaskSaveError};
-
-/// TaskManager provides the interface for scheduling and cancelling tasks.
-/// It runs in a separate tokio::spawn and sends tasks to the main TaskProcessor.
-#[derive(Debug)]
-pub struct TaskManager {
-    task_tx: mpsc::Sender<TaskCommand>,
-}
-
-impl TaskManager {
-    pub fn new(tx: mpsc::Sender<TaskCommand>) -> Self {
-        Self { task_tx: tx }
-    }
-
-    /// Schedule a task to run immediately
-    pub async fn schedule_task(
-        &self,
-        payload: String,
-    ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
-        let task = Task::new(payload);
-        let task_id = task.id;
-        self.task_tx.send(TaskCommand::Schedule(task)).await?;
-        Ok(task_id)
-    }
-
-    /// Schedule a task to run after a delay
-    pub async fn schedule_task_in(
-        &self,
-        payload: String,
-        delay: Duration,
-    ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
-        let task = Task::scheduled(payload, delay);
-        let task_id = task.id;
-        self.task_tx.send(TaskCommand::Schedule(task)).await?;
-        Ok(task_id)
-    }
-
-    /// Cancel a pending task by its ID
-    pub async fn cancel_task(&self, task_id: TaskId) -> Result<(), CancelError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if self
-            .task_tx
-            .send(TaskCommand::Cancel(task_id, reply_tx))
-            .await
-            .is_err()
-        {
-            panic!(
-                "TaskProcessor channel is closed. Cannot cancel task {}",
-                task_id
-            );
-        }
-        match reply_rx.await {
-            Ok(result) => result,
-            Err(_) => Err(CancelError::NotFound),
-        }
-    }
-
-    /// List all current pending tasks, their ids, payloads, and deadlines
-    pub async fn list_tasks(&self) -> Vec<Task> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if self
-            .task_tx
-            .send(TaskCommand::ListTasks(reply_tx))
-            .await
-            .is_err()
-        {
-            return Vec::new(); // channel closed
-        }
-        reply_rx.await.unwrap_or_default()
-    }
-}
+use super::{CancelError, Task, TaskCommand, TaskSaveError};
 
 /// TaskProcessor handles the actual task queue and processing in the main loop.
 /// Uses a priority queue (BinaryHeap) to manage tasks by deadline.
@@ -295,15 +224,4 @@ impl TaskProcessor {
 
         Ok(tasks)
     }
-}
-
-/// Create the task management channel pair.
-/// Returns (TaskManager, TaskProcessor) where:
-/// - TaskManager is used to schedule/cancel tasks (runs in spawn)
-/// - TaskProcessor processes tasks one at a time in main loop
-///
-/// Note: TaskProcessor::new is async because it loads persisted tasks from disk
-pub async fn create_task_channel() -> (TaskManager, TaskProcessor) {
-    let (tx, rx) = mpsc::channel::<TaskCommand>(100);
-    (TaskManager::new(tx), TaskProcessor::new(rx).await)
 }

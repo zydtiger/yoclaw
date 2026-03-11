@@ -29,7 +29,7 @@ impl Message {
 impl Agent {
     pub fn new(
         agent_config: &crate::config::AgentConfig,
-        task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+        task_manager: std::sync::Arc<crate::tasks::TaskManager>,
         memory_store: crate::agent::MemoryStore,
         embedding: crate::agent::Embedding,
     ) -> Result<Self, url::ParseError> {

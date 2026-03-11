@@ -46,7 +46,7 @@ pub struct ToolCall {
 impl ToolCall {
     pub async fn execute(
         &self,
-        task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+        task_manager: std::sync::Arc<crate::tasks::TaskManager>,
         embedding: &crate::agent::Embedding,
         memory_store: &crate::agent::MemoryStore,
     ) -> String {

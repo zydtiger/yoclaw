@@ -106,7 +106,7 @@ pub struct Agent {
     pub tools: Vec<Tool>,
     pub client: Client,
     pub messages: Vec<Message>,
-    pub task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+    pub task_manager: std::sync::Arc<crate::tasks::TaskManager>,
     pub memory_store: MemoryStore,
     pub embedding: Embedding,
 }

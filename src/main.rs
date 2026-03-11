@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Notify};
 use crate::agent::Agent;
 use crate::channels::telegram::TelegramChannel;
 use crate::channels::Channel;
-use crate::tasks::task_manager::create_task_channel;
+use crate::tasks::create_task_channel;
 
 mod agent;
 mod channels;

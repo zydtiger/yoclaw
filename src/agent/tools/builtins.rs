@@ -171,7 +171,7 @@ pub async fn get_url(args: Value) -> String {
 /// Expects args to be { "payload": string, "delay_seconds": number }
 pub async fn schedule_task(
     args: Value,
-    task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+    task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
     let args = if let Some(inner_str) = args.as_str() {
         match serde_json::from_str::<Value>(inner_str) {
@@ -210,7 +210,7 @@ pub async fn schedule_task(
 /// Expects args to be { "task_id": number }
 pub async fn cancel_task(
     args: Value,
-    task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+    task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
     let args = if let Some(inner_str) = args.as_str() {
         match serde_json::from_str::<Value>(inner_str) {
@@ -240,7 +240,7 @@ pub async fn cancel_task(
 /// Lists all currently scheduled and pending tasks.
 pub async fn list_tasks(
     _args: Value,
-    task_manager: std::sync::Arc<crate::tasks::task_manager::TaskManager>,
+    task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
     log::info!("Listing all pending tasks");
     let tasks = task_manager.list_tasks().await;

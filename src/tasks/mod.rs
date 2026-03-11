@@ -1,9 +1,24 @@
-pub mod task_manager;
+mod manager;
+mod processor;
 
 use chrono::{DateTime, Duration, Local, Utc};
 use serde::{Deserialize, Serialize, Serializer};
 use std::sync::atomic::{self, AtomicU64};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
+
+pub use manager::TaskManager;
+pub use processor::TaskProcessor;
+
+/// Create the task management channel pair.
+/// Returns (TaskManager, TaskProcessor) where:
+/// - TaskManager is used to schedule/cancel tasks (runs in spawn)
+/// - TaskProcessor processes tasks one at a time in main loop
+///
+/// Note: TaskProcessor::new is async because it loads persisted tasks from disk
+pub async fn create_task_channel() -> (TaskManager, TaskProcessor) {
+    let (tx, rx) = mpsc::channel::<TaskCommand>(100);
+    (TaskManager::new(tx), TaskProcessor::new(rx).await)
+}
 
 /// Unique identifier for a task
 pub type TaskId = u64;

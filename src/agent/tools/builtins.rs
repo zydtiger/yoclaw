@@ -265,9 +265,14 @@ pub async fn cancel_task(
         args
     };
 
-    let task_id = match args.pointer("/task_id").and_then(|v| v.as_u64()) {
+    let task_id_str = match args.pointer("/task_id").and_then(|v| v.as_str()) {
         Some(id) => id,
-        None => return "Error: 'task_id' field missing or not a positive integer".to_string(),
+        None => return "Error: 'task_id' field missing or not a string".to_string(),
+    };
+
+    let task_id = match uuid::Uuid::parse_str(task_id_str) {
+        Ok(id) => id,
+        Err(_) => return "Error: 'task_id' field is not a valid UUID".to_string(),
     };
 
     log::info!("Canceling task #{}", task_id);

@@ -3,7 +3,6 @@ mod processor;
 
 use chrono::{DateTime, Duration, Local, Utc};
 use serde::{Deserialize, Serialize, Serializer};
-use std::sync::atomic::{self, AtomicU64};
 use tokio::sync::{mpsc, oneshot};
 
 pub use manager::TaskManager;
@@ -21,10 +20,7 @@ pub async fn create_task_channel() -> (TaskManager, TaskProcessor) {
 }
 
 /// Unique identifier for a task
-pub type TaskId = u64;
-
-/// Static counter for generating unique TaskIds
-pub static TASK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub type TaskId = uuid::Uuid;
 
 pub enum TaskCommand {
     Schedule(Task),
@@ -53,9 +49,8 @@ where
 impl Task {
     /// Create a new task with the given payload (immediate execution)
     pub fn new(payload: String) -> Self {
-        let id = TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed);
         Self {
-            id,
+            id: uuid::Uuid::now_v7(),
             payload,
             deadline: Utc::now(),
         }
@@ -63,9 +58,8 @@ impl Task {
 
     /// Create a scheduled task with a delay
     pub fn scheduled(payload: String, delay: Duration) -> Self {
-        let id = TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed);
         Self {
-            id,
+            id: uuid::Uuid::now_v7(),
             payload,
             deadline: Utc::now() + delay,
         }

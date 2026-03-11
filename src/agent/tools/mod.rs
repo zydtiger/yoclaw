@@ -225,8 +225,8 @@ pub fn get_all_tools() -> Vec<Tool> {
                     r#type: "object".to_string(),
                     properties: json!({
                         "task_id": {
-                            "type": "number",
-                            "description": "The unique ID of the task to cancel".to_string()
+                            "type": "string",
+                            "description": "The unique ID of the task to cancel (UUID format)".to_string()
                         }
                     }),
                     required: Some(vec!["task_id".to_string()]),

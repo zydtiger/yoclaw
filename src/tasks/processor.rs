@@ -184,15 +184,8 @@ impl TaskProcessor {
             .await
             .map_err(|e| TaskSaveError::FsError(e))?;
 
-        let mut tasks: Vec<Task> =
+        let tasks: Vec<Task> =
             serde_json::from_str(&content).map_err(|e| TaskSaveError::InvalidFormat(e))?;
-
-        // Reset ids for tasks
-        tasks.iter_mut().enumerate().for_each(|(i, task)| {
-            task.id = i as u64;
-        });
-
-        super::TASK_ID_COUNTER.store(tasks.len() as u64, std::sync::atomic::Ordering::Relaxed);
 
         Ok(tasks)
     }

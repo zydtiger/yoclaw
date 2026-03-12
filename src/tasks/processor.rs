@@ -23,15 +23,9 @@ impl TaskProcessor {
         // Load persisted tasks from tasks.json
         match Self::load_tasks().await {
             Ok(tasks) => {
-                if !tasks.is_empty() {
-                    log::info!(
-                        "TaskProcessor: Loaded {} persisted task(s) from tasks.json",
-                        tasks.len()
-                    );
-                    // Add loaded tasks to the pending queue
-                    for task in tasks {
-                        pending_tasks.push(task);
-                    }
+                // Add loaded tasks to the pending queue
+                for task in tasks {
+                    pending_tasks.push(task);
                 }
             }
             Err(e) => {
@@ -53,7 +47,11 @@ impl TaskProcessor {
     /// 3. Persists tasks to `tasks.json` on graceful shutdown
     ///
     /// Must be run in a separate coroutine (tokio::spawn) to allow concurrent task management.
-    pub async fn run(mut self, agent_tx: mpsc::Sender<Task>, mut shutdown_signal: watch::Receiver<bool>) {
+    pub async fn run(
+        mut self,
+        agent_tx: mpsc::Sender<Task>,
+        mut shutdown_signal: watch::Receiver<bool>,
+    ) {
         loop {
             // Calculate sleep duration to next deadline
             // (Tokio sleep requires a std::time::Duration)
@@ -125,8 +123,6 @@ impl TaskProcessor {
                         let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
                         if let Err(e) = Self::save_tasks(&pending).await {
                             log::error!("Failed to save pending tasks: {}", e);
-                        } else {
-                            log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
                         }
                         break;
                     }
@@ -134,13 +130,10 @@ impl TaskProcessor {
 
                 // Branch 4: Channel closed (graceful shutdown)
                 else => {
-                    log::info!("TaskProcessor shutting down, saving {} pending task(s)", self.pending_tasks.len());
                     // Save pending tasks before exiting
                     let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
                     if let Err(e) = Self::save_tasks(&pending).await {
                         log::error!("Failed to save pending tasks: {}", e);
-                    } else {
-                        log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
                     }
                     break;
                 },
@@ -170,6 +163,7 @@ impl TaskProcessor {
             .await
             .map_err(|e| TaskSaveError::FsError(e))?;
 
+        log::info!("Saved {} task(s) to tasks.json", tasks.len());
         Ok(())
     }
 
@@ -188,6 +182,7 @@ impl TaskProcessor {
         let tasks: Vec<Task> =
             serde_json::from_str(&content).map_err(|e| TaskSaveError::InvalidFormat(e))?;
 
+        log::info!("Loaded {} task(s) from tasks.json", tasks.len());
         Ok(tasks)
     }
 }

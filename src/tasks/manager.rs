@@ -1,7 +1,7 @@
 use chrono::Duration;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{CancelError, Task, TaskCommand, TaskId};
+use super::{CancelError, Task, TaskCommand, TaskId, TaskRepeat};
 
 /// TaskManager provides the interface for scheduling and cancelling tasks.
 /// It runs in a separate tokio::spawn and sends tasks to the main TaskProcessor.
@@ -32,7 +32,20 @@ impl TaskManager {
         payload: String,
         delay: Duration,
     ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
-        let task = Task::scheduled(payload, delay);
+        let task = Task::scheduled(payload, delay, None);
+        let task_id = task.id;
+        self.task_tx.send(TaskCommand::Schedule(task)).await?;
+        Ok(task_id)
+    }
+
+    /// Schedule a task to run after a delay and repeat on a fixed interval.
+    pub async fn schedule_repeating_task_in(
+        &self,
+        payload: String,
+        delay: Duration,
+        repeat: TaskRepeat,
+    ) -> Result<TaskId, mpsc::error::SendError<TaskCommand>> {
+        let task = Task::scheduled(payload, delay, Some(repeat));
         let task_id = task.id;
         self.task_tx.send(TaskCommand::Schedule(task)).await?;
         Ok(task_id)

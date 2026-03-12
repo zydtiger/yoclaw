@@ -109,6 +109,14 @@ impl TaskProcessor {
                     while let Some(task) = self.pending_tasks.peek() {
                         if task.is_ready() {
                             let task = self.pending_tasks.pop().unwrap();
+                            if let Some(next_task) = task.next_recurrence() {
+                                log::info!(
+                                    "Repeating task #{} rescheduled for {:?}",
+                                    next_task.id,
+                                    next_task.deadline
+                                );
+                                self.pending_tasks.push(next_task);
+                            }
                             agent_tx.send(task).await.expect("Agent worker coroutine died");
                         } else {
                             break; // Next task not ready yet

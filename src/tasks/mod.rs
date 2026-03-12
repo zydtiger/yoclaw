@@ -10,8 +10,8 @@ pub use processor::TaskProcessor;
 
 /// Create the task management channel pair.
 /// Returns (TaskManager, TaskProcessor) where:
-/// - TaskManager is used to schedule/cancel tasks (runs in spawn)
-/// - TaskProcessor processes tasks one at a time in main loop
+/// - TaskManager is the send-side API for scheduling/canceling/listing tasks
+/// - TaskProcessor is the receive-side worker that should run in a spawned task
 ///
 /// Note: TaskProcessor::new is async because it loads persisted tasks from disk
 pub async fn create_task_channel() -> (TaskManager, TaskProcessor) {
@@ -28,6 +28,21 @@ pub enum TaskCommand {
     ListTasks(oneshot::Sender<Vec<Task>>),
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TaskRepeat {
+    Daily,
+    Weekly,
+}
+
+impl TaskRepeat {
+    pub fn next_deadline(self, deadline: DateTime<Utc>) -> DateTime<Utc> {
+        match self {
+            Self::Daily => deadline + Duration::days(1),
+            Self::Weekly => deadline + Duration::weeks(1),
+        }
+    }
+}
+
 /// A task to be processed by the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -36,6 +51,9 @@ pub struct Task {
 
     #[serde(serialize_with = "serialize_to_local")]
     pub deadline: DateTime<Utc>,
+
+    #[serde(default)]
+    pub repeat: Option<TaskRepeat>,
 }
 
 fn serialize_to_local<S>(date: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
@@ -53,16 +71,28 @@ impl Task {
             id: uuid::Uuid::now_v7(),
             payload,
             deadline: Utc::now(),
+            repeat: None,
         }
     }
 
     /// Create a scheduled task with a delay
-    pub fn scheduled(payload: String, delay: Duration) -> Self {
+    pub fn scheduled(payload: String, delay: Duration, repeat: Option<TaskRepeat>) -> Self {
         Self {
             id: uuid::Uuid::now_v7(),
             payload,
             deadline: Utc::now() + delay,
+            repeat,
         }
+    }
+
+    /// Create the next instance of a repeating task using the original deadline as the anchor.
+    pub fn next_recurrence(&self) -> Option<Self> {
+        self.repeat.map(|repeat| Self {
+            id: uuid::Uuid::now_v7(),
+            payload: self.payload.clone(),
+            deadline: repeat.next_deadline(self.deadline),
+            repeat: Some(repeat),
+        })
     }
 
     /// Check if the task is ready to execute

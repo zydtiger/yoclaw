@@ -1,8 +1,21 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+mod command;
 mod handler;
 pub mod telegram;
+
+/// A bot command that can be registered with a channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotCommand {
+    pub command: String,
+    pub description: String,
+}
+
+/// Manages channel commands.
+pub struct CommandManager {
+    pub commands: Vec<BotCommand>,
+}
 
 /// A generic message received from any channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +49,12 @@ pub trait Channel: Send + Sync {
         chat_id: &str,
         message_id: i64,
         emoji: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Register bot commands.
+    async fn register_commands(
+        &self,
+        commands: Vec<BotCommand>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 

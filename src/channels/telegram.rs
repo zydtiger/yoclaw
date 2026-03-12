@@ -216,4 +216,30 @@ impl Channel for TelegramChannel {
 
         Ok(())
     }
+
+    async fn register_commands(
+        &self,
+        commands: Vec<super::BotCommand>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = self.api_url("setMyCommands");
+        
+        let req_body = serde_json::json!({
+            "commands": commands
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&req_body)
+            .send()
+            .await?
+            .json::<TelegramResponse<serde_json::Value>>()
+            .await?;
+
+        if !response.ok {
+            return Err(format!("Telegram API error setting commands: {:?}", response.description).into());
+        }
+
+        Ok(())
+    }
 }

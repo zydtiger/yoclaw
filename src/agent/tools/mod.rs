@@ -52,32 +52,42 @@ impl ToolCall {
         embedding: &crate::agent::Embedding,
         memory_store: &crate::agent::MemoryStore,
     ) -> String {
+        // Decode inner JSON arguments if needed
+        let args = if let Some(inner_str) = self.function.arguments.as_str() {
+            match serde_json::from_str::<Value>(inner_str) {
+                Ok(v) => v,
+                Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
+            }
+        } else {
+            self.function.arguments.clone()
+        };
+
         match self.function.name.as_str() {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
             "generic_shell" => {
-                builtins::generic_shell(self.function.arguments.clone(), environment).await
+                builtins::generic_shell(args.clone(), environment).await
             }
-            "use_skill" => builtins::use_skill(self.function.arguments.clone(), skill_store).await,
-            "read_file" => builtins::read_file(self.function.arguments.clone()).await,
-            "write_file" => builtins::write_file(self.function.arguments.clone()).await,
-            "get_url" => builtins::get_url(self.function.arguments.clone()).await,
+            "use_skill" => builtins::use_skill(args.clone(), skill_store).await,
+            "read_file" => builtins::read_file(args.clone()).await,
+            "write_file" => builtins::write_file(args.clone()).await,
+            "get_url" => builtins::get_url(args.clone()).await,
             "schedule_task" => {
-                builtins::schedule_task(self.function.arguments.clone(), task_manager).await
+                builtins::schedule_task(args.clone(), task_manager).await
             }
             "cancel_task" => {
-                builtins::cancel_task(self.function.arguments.clone(), task_manager).await
+                builtins::cancel_task(args.clone(), task_manager).await
             }
             "list_tasks" => {
-                builtins::list_tasks(self.function.arguments.clone(), task_manager).await
+                builtins::list_tasks(args.clone(), task_manager).await
             }
             "add_memory" => {
-                builtins::add_memory(self.function.arguments.clone(), embedding, memory_store).await
+                builtins::add_memory(args.clone(), embedding, memory_store).await
             }
             "remove_memory" => {
-                builtins::remove_memory(self.function.arguments.clone(), memory_store).await
+                builtins::remove_memory(args.clone(), memory_store).await
             }
             "search_memory" => {
-                builtins::search_memory(self.function.arguments.clone(), embedding, memory_store)
+                builtins::search_memory(args.clone(), embedding, memory_store)
                     .await
             }
             _ => format!("Error: Unknown tool '{}'", self.function.name),

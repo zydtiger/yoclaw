@@ -12,16 +12,6 @@ pub async fn generic_shell(
     args: Value,
     environment: &std::collections::HashMap<String, String>,
 ) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        // If it's a string, we MUST be able to decode it.
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        // If it's already an object, use it directly
-        args
-    };
 
     let command = match args.pointer("/command").and_then(|v| v.as_str()) {
         Some(cmd) => cmd.to_string(),
@@ -71,14 +61,6 @@ pub async fn generic_shell(
 
 /// Retrieves the raw contents of a loaded skill by name dynamically from disk to ensure it's not stale.
 pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillStore) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        args
-    };
 
     let name = match args.pointer("/name").and_then(|v| v.as_str()) {
         Some(n) => n,
@@ -117,16 +99,6 @@ pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillSto
 /// Reads file contents.
 /// Expects args to be { "path": string }
 pub async fn read_file(args: Value) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        // If it's a string, we MUST be able to decode it.
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        // If it's already an object, use it directly
-        args
-    };
 
     let path = match args.pointer("/path").and_then(|v| v.as_str()) {
         Some(cmd) => cmd.to_string(),
@@ -144,16 +116,6 @@ pub async fn read_file(args: Value) -> String {
 /// Writes content to a file.
 /// Expects args to be { "path": string, "content": string }
 pub async fn write_file(args: Value) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        // If it's a string, we MUST be able to decode it.
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        // If it's already an object, use it directly
-        args
-    };
 
     let path = match args.pointer("/path").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
@@ -176,16 +138,6 @@ pub async fn write_file(args: Value) -> String {
 /// Fetches content from a URL and returns the response.
 /// Expects args to be { "url": string }
 pub async fn get_url(args: Value) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        // If it's a string, we MUST be able to decode it.
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        // If it's already an object, use it directly
-        args
-    };
 
     let url = match args.pointer("/url").and_then(|v| v.as_str()) {
         Some(u) => u.to_string(),
@@ -217,14 +169,6 @@ pub async fn schedule_task(
     args: Value,
     task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        args
-    };
 
     let payload = match args.pointer("/payload").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
@@ -256,14 +200,6 @@ pub async fn cancel_task(
     args: Value,
     task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        args
-    };
 
     let task_id_str = match args.pointer("/task_id").and_then(|v| v.as_str()) {
         Some(id) => id,
@@ -305,14 +241,6 @@ pub async fn add_memory(
     embedding: &crate::agent::Embedding,
     memory_store: &crate::agent::MemoryStore,
 ) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        args
-    };
 
     let text = match args.pointer("/text").and_then(|v| v.as_str()) {
         Some(t) => t.to_string(),
@@ -334,14 +262,6 @@ pub async fn add_memory(
 
 /// Removes a memory from the vector database by ID.
 pub async fn remove_memory(args: Value, memory_store: &crate::agent::MemoryStore) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        args
-    };
 
     let id = match args.pointer("/id").and_then(|v| v.as_u64()) {
         Some(id) => id as i64,
@@ -362,14 +282,6 @@ pub async fn search_memory(
     embedding: &crate::agent::Embedding,
     memory_store: &crate::agent::MemoryStore,
 ) -> String {
-    let args = if let Some(inner_str) = args.as_str() {
-        match serde_json::from_str::<Value>(inner_str) {
-            Ok(v) => v,
-            Err(e) => return format!("Error: Failed to decode inner JSON: {}", e),
-        }
-    } else {
-        args
-    };
 
     let query = match args.pointer("/query").and_then(|v| v.as_str()) {
         Some(q) => q.to_string(),

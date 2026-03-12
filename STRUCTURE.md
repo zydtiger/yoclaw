@@ -10,12 +10,12 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 
 ## All `tokio::spawn` Locations
 
-| #   | Location                    | Purpose                                            |
-| --- | --------------------------- | -------------------------------------------------- |
-| 1   | `src/main.rs`               | **Graceful Shutdown** coroutine (SIGTERM listener) |
-| 2   | `src/main.rs`               | **Telegram Listener** coroutine (poll incoming)    |
-| 3   | `src/main.rs`               | **Telegram Sender** coroutine (send outgoing)      |
-| 4   | `src/main.rs`               | **TaskProcessor** coroutine (avoids deadlock)      |
+| #   | Location      | Purpose                                            |
+| --- | ------------- | -------------------------------------------------- |
+| 1   | `src/main.rs` | **Graceful Shutdown** coroutine (SIGTERM listener) |
+| 2   | `src/main.rs` | **Telegram Listener** coroutine (poll incoming)    |
+| 3   | `src/main.rs` | **Telegram Sender** coroutine (send outgoing)      |
+| 4   | `src/main.rs` | **TaskProcessor** coroutine (avoids deadlock)      |
 
 ---
 
@@ -29,19 +29,19 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 
 ### Resources Owned
 
-| Resource          | Type                          | Ownership                                |
-| ----------------- | ----------------------------- | ---------------------------------------- |
-| `TelegramChannel` | `Arc<dyn Channel>`            | **Shared** (listener + sender)           |
-| `task_routes`     | `Arc<Mutex<HashMap<...>>>`    | **Shared** (listener + sender)           |
-| `TaskManager`     | `Arc<TaskManager>`            | **Shared** (with Agent for tool calls)   |
-| `shutdown_signal` | `watch::Receiver<bool>`       | **Shared**                               |
+| Resource          | Type                       | Ownership                              |
+| ----------------- | -------------------------- | -------------------------------------- |
+| `TelegramChannel` | `Arc<dyn Channel>`         | **Shared** (listener + sender)         |
+| `task_routes`     | `Arc<Mutex<HashMap<...>>>` | **Shared** (listener + sender)         |
+| `TaskManager`     | `Arc<TaskManager>`         | **Shared** (with Agent for tool calls) |
+| `shutdown_signal` | `watch::Receiver<bool>`    | **Shared**                             |
 
 ### Communication Patterns
 
-| Direction    | Channel Type                | Purpose                            |
-| ------------ | --------------------------- | ---------------------------------- |
-| **Incoming** | Telegram API (HTTP polling) | Polls `/getUpdates` via long poll  |
-| **Outgoing** | `TaskManager`               | Schedules user messages as tasks   |
+| Direction    | Channel Type                | Purpose                           |
+| ------------ | --------------------------- | --------------------------------- |
+| **Incoming** | Telegram API (HTTP polling) | Polls `/getUpdates` via long poll |
+| **Outgoing** | `TaskManager`               | Schedules user messages as tasks  |
 
 ### Loop Structure
 
@@ -80,39 +80,26 @@ loop {
 
 ### Resources Owned
 
-| Resource          | Type                          | Ownership                             |
-| ----------------- | ----------------------------- | ------------------------------------- |
-| `TelegramChannel` | `Arc<dyn Channel>`            | **Shared** (listener + sender)        |
-| `task_routes`     | `Arc<Mutex<HashMap<...>>>`    | **Shared** (listener + sender)        |
-| `channel_rx`      | `mpsc::Receiver<ChannelResponse>` | **Exclusive**                     |
-| `shutdown_signal` | `watch::Receiver<bool>`       | **Shared**                            |
+| Resource          | Type                              | Ownership                      |
+| ----------------- | --------------------------------- | ------------------------------ |
+| `TelegramChannel` | `Arc<dyn Channel>`                | **Shared** (listener + sender) |
+| `task_routes`     | `Arc<Mutex<HashMap<...>>>`        | **Shared** (listener + sender) |
+| `channel_rx`      | `mpsc::Receiver<ChannelResponse>` | **Exclusive**                  |
 
 ### Loop Structure
 
 ```rust
 loop {
-    if draining {
-        match channel_rx.recv().await {
-            Some(response) => self.forward_response(response).await,
-            None => break,
-        }
-    } else {
-        tokio::select! {
-            Some(response) = channel_rx.recv() => {
-                self.forward_response(response).await;
-            }
-
-            _ = shutdown_signal.changed() => {
-                draining = true;
-            }
-        }
+    match channel_rx.recv().await {
+        Some(response) => self.forward_response(response).await,
+        None => break,
     }
 }
 
 self.save_routes().await;
 ```
 
-**Lifecycle:** On shutdown it drains `channel_rx`, then saves routes and exits
+**Lifecycle:** Runs until all `channel_tx` senders are dropped, then saves routes and exits
 
 ---
 
@@ -242,11 +229,12 @@ sequenceDiagram
         External->>P5: SIGTERM (Ctrl+C)
         P5->>P2: watch::Sender<bool>
         P5->>P3: watch::Sender<bool>
-        P5->>P4: watch::Sender<bool>
-        P3->>P3: Stop polling for new messages
-        P4->>P4: Drain pending responses
-        P4->>P4: Save routing table to routes.json
         P2->>P2: Save pending tasks to tasks.json
+        P3->>P3: Stop polling for new messages
+        P2->>P1: `agent_tx` dies
+        P1->>P4: `channel_tx` dies
+        P4->>P4: Drain pending responses until channel closes
+        P4->>P4: Save routing table to routes.json
         Note over P1, External: Application exits cleanly
     end
 ```
@@ -255,29 +243,29 @@ sequenceDiagram
 
 ## Communication Channels Summary
 
-| Channel               | Type                | Size | Sender             | Receiver           | Purpose                        |
-| --------------------- | ------------------- | ---- | ------------------ | ------------------ | ------------------------------ |
-| **Outgoing Messages** | `mpsc::ChannelResponse` | 16 | Agent (main)    | Telegram Sender    | Send AI responses to Telegram  |
-| **Task Execution**    | `mpsc::Task`        | 32   | TaskProcessor      | Agent (main)       | Queue tasks for AI processing  |
-| **Task Command**      | `mpsc::TaskCommand` | 100  | TaskManager (Arc)  | TaskProcessor      | Schedule/cancel/list tasks     |
-| **Task Control**      | `oneshot::Result`   | 1    | TaskProcessor      | TaskManager        | Async response for cancel/list |
-| **Shutdown Signal**   | `watch::bool`       | 1    | Shutdown Coroutine | TaskProcessor, Listener, Sender | Graceful shutdown coordination |
+| Channel               | Type                    | Size | Sender             | Receiver                | Purpose                        |
+| --------------------- | ----------------------- | ---- | ------------------ | ----------------------- | ------------------------------ |
+| **Outgoing Messages** | `mpsc::ChannelResponse` | 16   | Agent (main)       | Telegram Sender         | Send AI responses to Telegram  |
+| **Task Execution**    | `mpsc::Task`            | 32   | TaskProcessor      | Agent (main)            | Queue tasks for AI processing  |
+| **Task Command**      | `mpsc::TaskCommand`     | 100  | TaskManager (Arc)  | TaskProcessor           | Schedule/cancel/list tasks     |
+| **Task Control**      | `oneshot::Result`       | 1    | TaskProcessor      | TaskManager             | Async response for cancel/list |
+| **Shutdown Signal**   | `watch::bool`           | 1    | Shutdown Coroutine | TaskProcessor, Listener | Graceful shutdown coordination |
 
 ---
 
 ## Resource Ownership Matrix
 
-| Resource                                | Owner               | Shared With                        | Access Pattern                                              |
-| --------------------------------------- | ------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| **TelegramChannel**                     | Channel Handler     | Listener, Sender                    | `Arc<dyn Channel>` - concurrent read-only access            |
-| **Agent (messages, tools)**             | Main Thread (Agent) | None                               | Exclusive ownership - single owner prevents race conditions |
-| **TaskManager**                         | Main (Arc)          | Telegram Coroutine, Agent          | `Arc<TaskManager>` - concurrent access via channel          |
-| **mpsc::Sender<ChannelResponse> (channel_tx)**   | Main Thread (Agent) | None                    | Exclusive ownership                                         |
-| **mpsc::Receiver<ChannelResponse> (channel_rx)** | Telegram Sender     | None                    | Exclusive ownership                                         |
-| **mpsc::Receiver<Task> (agent_rx)**     | Main Thread (Agent) | None                               | Exclusive ownership                                         |
-| **BinaryHeap<Task>**                    | TaskProcessor       | None                               | Exclusive ownership - task queue                            |
-| **task_routes**                         | Channel Handler     | Listener, Sender                    | `Arc<Mutex<HashMap<TaskId, String>>>`                       |
-| **shutdown_signal (watch::Receiver<bool>)** | Shutdown Coroutine | TaskProcessor, Listener, Sender | `watch` broadcast, cloned per coroutine                     |
+| Resource                                         | Owner               | Shared With               | Access Pattern                                              |
+| ------------------------------------------------ | ------------------- | ------------------------- | ----------------------------------------------------------- |
+| **TelegramChannel**                              | Channel Handler     | Listener, Sender          | `Arc<dyn Channel>` - concurrent read-only access            |
+| **Agent (messages, tools)**                      | Main Thread (Agent) | None                      | Exclusive ownership - single owner prevents race conditions |
+| **TaskManager**                                  | Main (Arc)          | Telegram Coroutine, Agent | `Arc<TaskManager>` - concurrent access via channel          |
+| **mpsc::Sender<ChannelResponse> (channel_tx)**   | Main Thread (Agent) | None                      | Exclusive ownership                                         |
+| **mpsc::Receiver<ChannelResponse> (channel_rx)** | Telegram Sender     | None                      | Exclusive ownership                                         |
+| **mpsc::Receiver<Task> (agent_rx)**              | Main Thread (Agent) | None                      | Exclusive ownership                                         |
+| **BinaryHeap<Task>**                             | TaskProcessor       | None                      | Exclusive ownership - task queue                            |
+| **task_routes**                                  | Channel Handler     | Listener, Sender          | `Arc<Mutex<HashMap<TaskId, String>>>`                       |
+| **shutdown_signal (watch::Receiver<bool>)**      | Shutdown Coroutine  | TaskProcessor, Listener   | `watch` broadcast, cloned per coroutine                     |
 
 ---
 
@@ -366,10 +354,10 @@ The application implements graceful shutdown using `Arc<Notify>` to coordinate b
 
 ### Shutdown Triggers
 
-| Trigger          | Source             | Handler                      | Action               |
-| ---------------- | ------------------ | ---------------------------- | -------------------- |
-| SIGTERM / Ctrl+C | Shutdown Coroutine | `tokio::signal::ctrl_c()`    | Broadcast `Notify` |
-| Channel closed   | Respective Loop    | `tokio::select!` else branch | Save state and exit  |
+| Trigger          | Source             | Handler                      | Action              |
+| ---------------- | ------------------ | ---------------------------- | ------------------- |
+| SIGTERM / Ctrl+C | Shutdown Coroutine | `tokio::signal::ctrl_c()`    | Broadcast `Notify`  |
+| Channel closed   | Respective Loop    | `tokio::select!` else branch | Save state and exit |
 
 ---
 

@@ -68,12 +68,24 @@ async fn main() {
         }
     });
 
-    // Spawn unified Telegram coroutine - handles both polling and sending
+    // Spawn Telegram listener coroutine for incoming messages
     let handler_shutdown_rx = shutdown_rx.clone();
+    let listener_handler = channel_handler.clone();
+    let listener_task_manager = task_manager.clone();
     let handler_task = tokio::spawn(async move {
-        log::info!("ChannelHandler started - waiting for messages...");
-        channel_handler
-            .start_listening(channel_rx, task_manager, handler_shutdown_rx)
+        log::info!("ChannelHandler listener started - waiting for messages...");
+        listener_handler
+            .start_listening(listener_task_manager, handler_shutdown_rx)
+            .await;
+    });
+
+    // Spawn Telegram sender coroutine for outgoing responses
+    let sender_shutdown_rx = shutdown_rx.clone();
+    let sender_handler = channel_handler;
+    let sender_task = tokio::spawn(async move {
+        log::info!("ChannelHandler sender started - waiting for responses...");
+        sender_handler
+            .start_sending(channel_rx, sender_shutdown_rx)
             .await;
     });
 
@@ -113,11 +125,15 @@ async fn main() {
                 status: ResponseStatus::Terminate,
             })
             .await
-            .expect("Failed to send to channel");
+            .unwrap_or_else(|e| log::error!("Failed to send final response to channel: {}", e));
     }
 
-    // Wait for the spawned tasks to finish graceful shutdown
-    let _ = tokio::join!(handler_task, processor_task);
+    drop(agent);
+    drop(channel_tx);
+
+    let _ = handler_task.await;
+    let _ = processor_task.await;
+    let _ = sender_task.await;
 
     log::info!("Application shutdown complete");
 }

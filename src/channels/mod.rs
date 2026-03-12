@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 mod command;
 mod handler;
@@ -74,9 +76,10 @@ pub trait Channel: Send + Sync {
 }
 
 /// Handler for channel listening.
+#[derive(Clone)]
 pub struct ChannelHandler {
-    pub channel: Box<dyn Channel>,
+    pub channel: Arc<dyn Channel>,
     pub allowed_users: Vec<String>,
     pub recv_confirm: Option<String>,
-    pub task_routes: std::collections::HashMap<TaskId, String>,
+    pub task_routes: Arc<Mutex<std::collections::HashMap<TaskId, String>>>,
 }

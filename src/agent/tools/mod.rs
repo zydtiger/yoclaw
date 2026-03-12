@@ -64,32 +64,17 @@ impl ToolCall {
 
         match self.function.name.as_str() {
             "get_current_time" => builtins::get_current_time(self.function.arguments.clone()),
-            "generic_shell" => {
-                builtins::generic_shell(args.clone(), environment).await
-            }
+            "generic_shell" => builtins::generic_shell(args.clone(), environment).await,
             "use_skill" => builtins::use_skill(args.clone(), skill_store).await,
             "read_file" => builtins::read_file(args.clone()).await,
             "write_file" => builtins::write_file(args.clone()).await,
             "get_url" => builtins::get_url(args.clone()).await,
-            "schedule_task" => {
-                builtins::schedule_task(args.clone(), task_manager).await
-            }
-            "cancel_task" => {
-                builtins::cancel_task(args.clone(), task_manager).await
-            }
-            "list_tasks" => {
-                builtins::list_tasks(args.clone(), task_manager).await
-            }
-            "add_memory" => {
-                builtins::add_memory(args.clone(), embedding, memory_store).await
-            }
-            "remove_memory" => {
-                builtins::remove_memory(args.clone(), memory_store).await
-            }
-            "search_memory" => {
-                builtins::search_memory(args.clone(), embedding, memory_store)
-                    .await
-            }
+            "schedule_task" => builtins::schedule_task(args.clone(), task_manager).await,
+            "cancel_task" => builtins::cancel_task(args.clone(), task_manager).await,
+            "list_tasks" => builtins::list_tasks(args.clone(), task_manager).await,
+            "add_memory" => builtins::add_memory(args.clone(), embedding, memory_store).await,
+            "remove_memory" => builtins::remove_memory(args.clone(), memory_store).await,
+            "search_memory" => builtins::search_memory(args.clone(), embedding, memory_store).await,
             _ => format!("Error: Unknown tool '{}'", self.function.name),
         }
     }
@@ -207,7 +192,7 @@ pub fn get_all_tools() -> Vec<Tool> {
             r#type: "function".to_string(),
             function: FunctionTool {
                 name: "schedule_task".to_string(),
-                description: "Schedules a message payload to be sent to the agent itself after a specified delay in seconds. Use this to remind yourself to do things in the future.".to_string(),
+                description: "Schedules a message payload to be sent to the agent itself after a specified delay in seconds. Optionally repeat it on a daily or weekly cadence.".to_string(),
                 parameters: Parameters {
                     r#type: "object".to_string(),
                     properties: json!({
@@ -218,6 +203,11 @@ pub fn get_all_tools() -> Vec<Tool> {
                         "delay_seconds": {
                             "type": "number",
                             "description": "The delay in seconds before the task is executed".to_string()
+                        },
+                        "repeat": {
+                            "type": "string",
+                            "description": "Optional repeat interval: daily or weekly".to_string(),
+                            "enum": ["daily", "weekly"]
                         }
                     }),
                     required: Some(vec!["payload".to_string(), "delay_seconds".to_string()]),
@@ -245,7 +235,7 @@ pub fn get_all_tools() -> Vec<Tool> {
             r#type: "function".to_string(),
             function: FunctionTool {
                 name: "list_tasks".to_string(),
-                description: "Lists all currently scheduled and pending tasks along with their IDs, payloads, and deadlines".to_string(),
+                description: "Lists all currently scheduled and pending tasks along with their IDs, payloads, deadlines, and repeat intervals".to_string(),
                 parameters: Parameters {
                     r#type: "object".to_string(),
                     properties: json!({}),

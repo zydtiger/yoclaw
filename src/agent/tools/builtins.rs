@@ -12,7 +12,6 @@ pub async fn generic_shell(
     args: Value,
     environment: &std::collections::HashMap<String, String>,
 ) -> String {
-
     let command = match args.pointer("/command").and_then(|v| v.as_str()) {
         Some(cmd) => cmd.to_string(),
         None => return "Error: 'command' field missing or not a string".to_string(),
@@ -61,7 +60,6 @@ pub async fn generic_shell(
 
 /// Retrieves the raw contents of a loaded skill by name dynamically from disk to ensure it's not stale.
 pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillStore) -> String {
-
     let name = match args.pointer("/name").and_then(|v| v.as_str()) {
         Some(n) => n,
         None => return "Error: 'name' field missing or not a string".to_string(),
@@ -69,7 +67,12 @@ pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillSto
 
     let skill = match skill_store.get_skill(name) {
         Some(s) => s,
-        None => return format!("Error: Skill '{}' not found in the skill metadata list.", name),
+        None => {
+            return format!(
+                "Error: Skill '{}' not found in the skill metadata list.",
+                name
+            )
+        }
     };
 
     // Attempt to load the skill dynamically from disk to get latest changes
@@ -99,7 +102,6 @@ pub async fn use_skill(args: Value, skill_store: &crate::agent::skills::SkillSto
 /// Reads file contents.
 /// Expects args to be { "path": string }
 pub async fn read_file(args: Value) -> String {
-
     let path = match args.pointer("/path").and_then(|v| v.as_str()) {
         Some(cmd) => cmd.to_string(),
         None => return "Error: 'path' field missing or not a string".to_string(),
@@ -116,7 +118,6 @@ pub async fn read_file(args: Value) -> String {
 /// Writes content to a file.
 /// Expects args to be { "path": string, "content": string }
 pub async fn write_file(args: Value) -> String {
-
     let path = match args.pointer("/path").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
         None => return "Error: 'path' field missing or not a string".to_string(),
@@ -138,7 +139,6 @@ pub async fn write_file(args: Value) -> String {
 /// Fetches content from a URL and returns the response.
 /// Expects args to be { "url": string }
 pub async fn get_url(args: Value) -> String {
-
     let url = match args.pointer("/url").and_then(|v| v.as_str()) {
         Some(u) => u.to_string(),
         None => return "Error: 'url' field missing or not a string".to_string(),
@@ -164,12 +164,11 @@ pub async fn get_url(args: Value) -> String {
 }
 
 /// Schedules a new task to be executed after a delay.
-/// Expects args to be { "payload": string, "delay_seconds": number }
+/// Expects args to be { "payload": string, "delay_seconds": number, "repeat"?: string }
 pub async fn schedule_task(
     args: Value,
     task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
-
     let payload = match args.pointer("/payload").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
         None => return "Error: 'payload' field missing or not a string".to_string(),
@@ -180,12 +179,38 @@ pub async fn schedule_task(
         None => return "Error: 'delay_seconds' field missing or not a number".to_string(),
     };
 
-    log::info!("Scheduling task in {}s: {}", delay_seconds, payload);
+    let repeat = match args.pointer("/repeat").and_then(|v| v.as_str()) {
+        Some("daily") => Some(crate::tasks::TaskRepeat::Daily),
+        Some("weekly") => Some(crate::tasks::TaskRepeat::Weekly),
+        Some(_) => return "Error: 'repeat' must be one of: daily, weekly".to_string(),
+        None => None,
+    };
 
-    match task_manager
-        .schedule_task_in(payload, chrono::Duration::seconds(delay_seconds))
-        .await
-    {
+    log::info!(
+        "Scheduling task in {}s with repeat {:?}: {}",
+        delay_seconds,
+        repeat,
+        payload
+    );
+
+    let result = match repeat {
+        Some(repeat) => {
+            task_manager
+                .schedule_repeating_task_in(
+                    payload,
+                    chrono::Duration::seconds(delay_seconds),
+                    repeat,
+                )
+                .await
+        }
+        None => {
+            task_manager
+                .schedule_task_in(payload, chrono::Duration::seconds(delay_seconds))
+                .await
+        }
+    };
+
+    match result {
         Ok(task_id) => {
             log::info!("Successfully scheduled task #{}", task_id);
             format!("Successfully scheduled task with ID: {}", task_id)
@@ -200,7 +225,6 @@ pub async fn cancel_task(
     args: Value,
     task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
-
     let task_id_str = match args.pointer("/task_id").and_then(|v| v.as_str()) {
         Some(id) => id,
         None => return "Error: 'task_id' field missing or not a string".to_string(),
@@ -241,7 +265,6 @@ pub async fn add_memory(
     embedding: &crate::agent::Embedding,
     memory_store: &crate::agent::MemoryStore,
 ) -> String {
-
     let text = match args.pointer("/text").and_then(|v| v.as_str()) {
         Some(t) => t.to_string(),
         None => return "Error: 'text' field missing or not a string".to_string(),
@@ -262,7 +285,6 @@ pub async fn add_memory(
 
 /// Removes a memory from the vector database by ID.
 pub async fn remove_memory(args: Value, memory_store: &crate::agent::MemoryStore) -> String {
-
     let id = match args.pointer("/id").and_then(|v| v.as_u64()) {
         Some(id) => id as i64,
         None => return "Error: 'id' field missing or not a positive integer".to_string(),
@@ -282,7 +304,6 @@ pub async fn search_memory(
     embedding: &crate::agent::Embedding,
     memory_store: &crate::agent::MemoryStore,
 ) -> String {
-
     let query = match args.pointer("/query").and_then(|v| v.as_str()) {
         Some(q) => q.to_string(),
         None => return "Error: 'query' field missing or not a string".to_string(),

@@ -31,13 +31,13 @@
 
 ## Task Model
 - `tasks::Task` now includes `repeat: Option<TaskRepeat>`.
-- Supported repeat values are `Daily`, `Weekly`, and `Monthly`.
+- Supported repeat values are `Daily` and `Weekly`.
 - Repeating tasks reschedule from the original deadline, not from the time they finish running. Example: a weekly 9:00 AM task due March 13 creates the next occurrence for March 20 at 9:00 AM.
 - `TaskProcessor` enqueues the next recurrence before dispatching the current due task.
 - Persisted tasks are stored in `tasks.json`; channel routes are stored in `routes.json`.
 
 ## Tool Surface
-- The built-in `schedule_task` tool accepts `payload`, `delay_seconds`, and optional `repeat` with values `daily`, `weekly`, or `monthly`.
+- The built-in `schedule_task` tool accepts `payload`, `delay_seconds`, and optional `repeat` with values `daily` or `weekly`.
 - `list_tasks` output now implicitly includes repeat metadata because it serializes the full `Task`.
 
 ## Practical Editing Notes

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, watch};
 
 use crate::agent::Agent;
 use crate::channels::telegram::TelegramChannel;
@@ -51,24 +51,23 @@ async fn main() {
     .expect("Failed to initialize Agent");
 
     // Set up signal handler for graceful shutdown
-    let shutdown_signal = Arc::new(Notify::new());
-    let shutdown_clone = shutdown_signal.clone();
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     tokio::spawn(async move {
         if let Err(e) = tokio::signal::ctrl_c().await {
             log::error!("Failed to listen for Ctrl+C: {}", e);
         } else {
             log::info!("Received shutdown signal (Ctrl+C/SIGTERM)");
-            shutdown_clone.notify_waiters();
+            let _ = shutdown_tx.send(true);
         }
     });
 
     // Spawn unified Telegram coroutine - handles both polling and sending
     let (channel_tx, channel_rx) = mpsc::channel::<(crate::tasks::TaskId, String)>(16);
-    let handler_shutdown_signal = shutdown_signal.clone();
-    tokio::spawn(async move {
+    let handler_shutdown_rx = shutdown_rx.clone();
+    let handler_task = tokio::spawn(async move {
         log::info!("ChannelHandler started - waiting for messages...");
         channel_handler
-            .start_listening(channel_rx, task_manager, handler_shutdown_signal)
+            .start_listening(channel_rx, task_manager, handler_shutdown_rx)
             .await;
     });
 
@@ -76,9 +75,10 @@ async fn main() {
     let (agent_tx, mut agent_rx) = mpsc::channel::<crate::tasks::Task>(32);
 
     // Spawn TaskProcessor in a separate coroutine to avoid deadlocks
-    tokio::spawn(async move {
+    let processor_shutdown_rx = shutdown_rx.clone();
+    let processor_task = tokio::spawn(async move {
         log::info!("TaskProcessor started - waiting for tasks...");
-        task_processor.run(agent_tx, shutdown_signal).await;
+        task_processor.run(agent_tx, processor_shutdown_rx).await;
     });
 
     // Main loop: Agent runs in main process handling tasks
@@ -92,6 +92,9 @@ async fn main() {
             .await
             .expect("Failed to send to channel");
     }
+
+    // Wait for the spawned tasks to finish graceful shutdown
+    let _ = tokio::join!(handler_task, processor_task);
 
     log::info!("Application shutdown complete");
 }

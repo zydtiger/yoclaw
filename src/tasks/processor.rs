@@ -1,10 +1,9 @@
 use chrono::Utc;
 use std::collections::BinaryHeap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, watch};
 use tokio::time::sleep;
 
 use super::{CancelError, Task, TaskCommand, TaskSaveError};
@@ -54,7 +53,7 @@ impl TaskProcessor {
     /// 3. Persists tasks to `tasks.json` on graceful shutdown
     ///
     /// Must be run in a separate coroutine (tokio::spawn) to allow concurrent task management.
-    pub async fn run(mut self, agent_tx: mpsc::Sender<Task>, shutdown_signal: Arc<Notify>) {
+    pub async fn run(mut self, agent_tx: mpsc::Sender<Task>, mut shutdown_signal: watch::Receiver<bool>) {
         loop {
             // Calculate sleep duration to next deadline
             // (Tokio sleep requires a std::time::Duration)
@@ -120,15 +119,17 @@ impl TaskProcessor {
                 },
 
                 // Branch 3: Graceful shutdown when SIGTERM is received
-                _ = shutdown_signal.notified() => {
-                    log::info!("Shutdown requested, saving {} pending task(s)", self.pending_tasks.len());
-                    let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
-                    if let Err(e) = Self::save_tasks(&pending).await {
-                        log::error!("Failed to save pending tasks: {}", e);
-                    } else {
-                        log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
+                _ = shutdown_signal.changed() => {
+                    if *shutdown_signal.borrow() {
+                        log::info!("TaskProcessor received shutdown signal, saving {} pending task(s)", self.pending_tasks.len());
+                        let pending: Vec<Task> = self.pending_tasks.iter().cloned().collect();
+                        if let Err(e) = Self::save_tasks(&pending).await {
+                            log::error!("Failed to save pending tasks: {}", e);
+                        } else {
+                            log::info!("Successfully saved {} pending task(s) to tasks.json", pending.len());
+                        }
+                        break;
                     }
-                    break;
                 }
 
                 // Branch 4: Channel closed (graceful shutdown)

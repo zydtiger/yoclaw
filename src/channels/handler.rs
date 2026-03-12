@@ -1,4 +1,5 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::watch;
 
 use crate::tasks::{TaskId, TaskManager};
 
@@ -52,7 +53,7 @@ impl ChannelHandler {
         mut self,
         mut channel_rx: tokio::sync::mpsc::Receiver<(TaskId, String)>,
         task_manager: Arc<TaskManager>,
-        shutdown_signal: Arc<tokio::sync::Notify>,
+        mut shutdown_signal: watch::Receiver<bool>,
     ) {
         loop {
             tokio::select! {
@@ -130,12 +131,14 @@ impl ChannelHandler {
                 }
 
                 // Branch 3: Graceful shutdown
-                _ = shutdown_signal.notified() => {
-                    log::info!("ChannelHandler received shutdown signal, saving routes...");
-                    if let Err(e) = self.save_routes().await {
-                        log::error!("Failed to save routes during shutdown: {}", e);
+                _ = shutdown_signal.changed() => {
+                    if *shutdown_signal.borrow() {
+                        log::info!("ChannelHandler received shutdown signal, saving {} route(s)...", self.task_routes.len());
+                        if let Err(e) = self.save_routes().await {
+                            log::error!("Failed to save routes during shutdown: {}", e);
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }

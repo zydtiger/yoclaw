@@ -3,7 +3,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::agent::Agent;
 use crate::channels::telegram::TelegramChannel;
-use crate::channels::ChannelHandler;
+use crate::channels::{Channel, ChannelHandler};
 use crate::tasks::create_task_channel;
 
 mod agent;
@@ -22,6 +22,11 @@ async fn main() {
     // Create Telegram channel
     let telegram_token = config.channels.telegram_token.clone();
     let channel = Box::new(TelegramChannel::new(telegram_token));
+    let command_manager = crate::channels::CommandManager::new();
+    channel
+        .register_commands(command_manager.commands.clone())
+        .await
+        .expect("Failed to register commands");
     let channel_handler = ChannelHandler::new(
         channel,
         config.channels.allowed_users.clone(),
@@ -86,7 +91,20 @@ async fn main() {
     log::info!("Agent loop started - waiting for tasks...");
     while let Some(task) = agent_rx.recv().await {
         log::info!("Executing task {}", task.id);
-        let response = agent.send_message(task.payload).await;
+
+        let response = if task.payload.starts_with('/') {
+            let parts: Vec<&str> = task.payload.splitn(2, ' ').collect();
+            let cmd = parts[0];
+            log::info!("Received command: {}", cmd);
+
+            match command_manager.execute(cmd, &mut agent) {
+                Some(response_text) => response_text,
+                None => "Unknown command. Try /help.".to_string(),
+            }
+        } else {
+            agent.send_message(task.payload).await
+        };
+
         channel_tx
             .send((task.id, response))
             .await

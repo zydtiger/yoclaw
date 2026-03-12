@@ -6,21 +6,21 @@ mod builtins;
 /// Represents a tool definition for use with the API.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Tool {
-    r#type: String,
-    function: FunctionTool,
+    pub r#type: String,
+    pub function: FunctionTool,
 }
 
 /// Represents a function tool with its name, description, and parameters.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct FunctionTool {
-    name: String,
-    description: String,
-    parameters: Parameters,
+pub struct FunctionTool {
+    pub name: String,
+    pub description: String,
+    pub parameters: Parameters,
 }
 
 /// Represents the parameters schema for a function tool.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct Parameters {
+pub struct Parameters {
     r#type: String,
     properties: Value,
 
@@ -57,9 +57,7 @@ impl ToolCall {
             "generic_shell" => {
                 builtins::generic_shell(self.function.arguments.clone(), environment).await
             }
-            "use_skill" => {
-                builtins::use_skill(self.function.arguments.clone(), skill_store).await
-            }
+            "use_skill" => builtins::use_skill(self.function.arguments.clone(), skill_store).await,
             "read_file" => builtins::read_file(self.function.arguments.clone()).await,
             "write_file" => builtins::write_file(self.function.arguments.clone()).await,
             "get_url" => builtins::get_url(self.function.arguments.clone()).await,

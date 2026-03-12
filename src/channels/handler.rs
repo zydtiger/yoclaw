@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::watch;
 
+use crate::channels::{ChannelResponse, ResponseStatus};
 use crate::tasks::{TaskId, TaskManager};
 
 use super::{Channel, ChannelHandler};
@@ -51,17 +52,18 @@ impl ChannelHandler {
 
     pub async fn start_listening(
         mut self,
-        mut channel_rx: tokio::sync::mpsc::Receiver<(TaskId, String)>,
+        mut channel_rx: tokio::sync::mpsc::Receiver<ChannelResponse>,
         task_manager: Arc<TaskManager>,
         mut shutdown_signal: watch::Receiver<bool>,
     ) {
         loop {
             tokio::select! {
                 // Branch 1: Send outgoing messages
-                Some((task_id, msg)) = channel_rx.recv() => {
+                Some(response) = channel_rx.recv() => {
+                    let task_id = response.task_id;
                     // Route the message to the original chat_id
-                    let chat_id = match self.task_routes.remove(&task_id) {
-                        Some(id) => id,
+                    let chat_id = match self.task_routes.get(&task_id) {
+                        Some(id) => id.clone(),
                         None => {
                             log::error!("Failed to route message for task {}: no chat_id found in task_routes. Dropping message.", task_id);
                             continue;
@@ -72,8 +74,12 @@ impl ChannelHandler {
                         log::error!("Failed to route message for task {}: chat_id is empty", task_id);
                         continue;
                     }
-                    if let Err(e) = self.channel.send_message(&chat_id, &msg).await {
+                    if let Err(e) = self.channel.send_message(&chat_id, &response.payload).await {
                         log::error!("Failed to send message to Telegram: {}", e);
+                    }
+
+                    if response.status == ResponseStatus::Terminate {
+                        self.task_routes.remove(&task_id);
                     }
                 }
 

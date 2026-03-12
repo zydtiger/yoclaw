@@ -5,6 +5,8 @@ mod command;
 mod handler;
 pub mod telegram;
 
+use crate::tasks::TaskId;
+
 /// A bot command that can be registered with a channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotCommand {
@@ -26,6 +28,19 @@ pub struct ChannelMessage {
     pub sender_id: String,
     pub sender_name: Option<String>,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ResponseStatus {
+    Continue,
+    Terminate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelResponse {
+    pub task_id: TaskId,
+    pub payload: String,
+    pub status: ResponseStatus,
 }
 
 /// A generic trait for all communication channels.
@@ -63,5 +78,5 @@ pub struct ChannelHandler {
     pub channel: Box<dyn Channel>,
     pub allowed_users: Vec<String>,
     pub recv_confirm: Option<String>,
-    pub task_routes: std::collections::HashMap<crate::tasks::TaskId, String>,
+    pub task_routes: std::collections::HashMap<TaskId, String>,
 }

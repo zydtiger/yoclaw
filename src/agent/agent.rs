@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
+use crate::channels::{ChannelResponse, ResponseStatus};
 
 impl Agent {
     pub async fn new(
@@ -10,6 +11,7 @@ impl Agent {
         task_manager: std::sync::Arc<crate::tasks::TaskManager>,
         memory_store: crate::agent::MemoryStore,
         embedding: crate::agent::Embedding,
+        channel_tx: tokio::sync::mpsc::Sender<ChannelResponse>,
     ) -> Result<Self, url::ParseError> {
         let parsed_url = match url::Url::parse(&agent_config.openai_api_base_url) {
             Ok(url) => url,
@@ -52,6 +54,7 @@ impl Agent {
             task_manager,
             memory_store,
             embedding,
+            channel_tx,
         })
     }
 
@@ -84,7 +87,7 @@ impl Agent {
         }
     }
 
-    pub async fn send_message(&mut self, content: String) -> String {
+    pub async fn start_task(&mut self, task_id: crate::tasks::TaskId, content: String) -> String {
         self.messages.push(Message::new(Role::User, content));
 
         loop {
@@ -109,6 +112,16 @@ impl Agent {
                     };
 
                     for tool_call in tool_calls {
+                        // Send progress update before calling tool
+                        let progress_msg = ChannelResponse {
+                            task_id,
+                            payload: format!("🔧 Calling {}...", tool_call.function.name),
+                            status: ResponseStatus::Continue,
+                        };
+                        if let Err(e) = self.channel_tx.send(progress_msg).await {
+                            log::error!("Failed to send updates: {}", e);
+                        }
+
                         log::info!("Calling tool: {}", tool_call.function.name);
                         let tool_result = tool_call
                             .execute(

@@ -3,7 +3,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::agent::Agent;
 use crate::channels::telegram::TelegramChannel;
-use crate::channels::{Channel, ChannelHandler};
+use crate::channels::{Channel, ChannelHandler, ChannelResponse, ResponseStatus};
 use crate::tasks::create_task_channel;
 
 mod agent;
@@ -33,6 +33,7 @@ async fn main() {
         config.channels.recv_confirm.clone(),
     )
     .await;
+    let (channel_tx, channel_rx) = mpsc::channel::<ChannelResponse>(16);
 
     // Create task channel pair
     let (task_manager, task_processor) = create_task_channel().await;
@@ -51,6 +52,7 @@ async fn main() {
         task_manager.clone(),
         memory_store,
         embedding,
+        channel_tx.clone(),
     )
     .await
     .expect("Failed to initialize Agent");
@@ -67,7 +69,6 @@ async fn main() {
     });
 
     // Spawn unified Telegram coroutine - handles both polling and sending
-    let (channel_tx, channel_rx) = mpsc::channel::<(crate::tasks::TaskId, String)>(16);
     let handler_shutdown_rx = shutdown_rx.clone();
     let handler_task = tokio::spawn(async move {
         log::info!("ChannelHandler started - waiting for messages...");
@@ -102,11 +103,15 @@ async fn main() {
                 None => "Unknown command. Try /help.".to_string(),
             }
         } else {
-            agent.send_message(task.payload).await
+            agent.start_task(task.id, task.payload).await
         };
 
         channel_tx
-            .send((task.id, response))
+            .send(ChannelResponse {
+                task_id: task.id,
+                payload: response,
+                status: ResponseStatus::Terminate,
+            })
             .await
             .expect("Failed to send to channel");
     }

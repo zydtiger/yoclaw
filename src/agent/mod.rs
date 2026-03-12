@@ -1,6 +1,8 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
+use crate::channels::ChannelResponse;
+
 mod agent;
 mod embedding;
 mod memory;
@@ -114,6 +116,9 @@ pub struct Agent {
     pub task_manager: std::sync::Arc<crate::tasks::TaskManager>,
     pub memory_store: MemoryStore,
     pub embedding: Embedding,
+
+    // Channel sender for progress updates during tool calls
+    pub channel_tx: tokio::sync::mpsc::Sender<ChannelResponse>,
 }
 
 /// Memory store struct for vector database

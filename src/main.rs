@@ -80,13 +80,10 @@ async fn main() {
     });
 
     // Spawn Telegram sender coroutine for outgoing responses
-    let sender_shutdown_rx = shutdown_rx.clone();
     let sender_handler = channel_handler;
     let sender_task = tokio::spawn(async move {
         log::info!("ChannelHandler sender started - waiting for responses...");
-        sender_handler
-            .start_sending(channel_rx, sender_shutdown_rx)
-            .await;
+        sender_handler.start_sending(channel_rx).await;
     });
 
     // Create channel for sending tasks from processor to agent
@@ -128,11 +125,12 @@ async fn main() {
             .unwrap_or_else(|e| log::error!("Failed to send final response to channel: {}", e));
     }
 
+    let _ = handler_task.await;
+    let _ = processor_task.await;
+
     drop(agent);
     drop(channel_tx);
 
-    let _ = handler_task.await;
-    let _ = processor_task.await;
     let _ = sender_task.await;
 
     log::info!("Application shutdown complete");

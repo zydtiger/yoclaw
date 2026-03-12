@@ -158,31 +158,11 @@ impl ChannelHandler {
     pub async fn start_sending(
         self,
         mut channel_rx: tokio::sync::mpsc::Receiver<ChannelResponse>,
-        mut shutdown_signal: watch::Receiver<bool>,
     ) {
-        let mut draining = false;
-
         loop {
-            if draining {
-                match channel_rx.recv().await {
-                    Some(response) => self.forward_response(response).await,
-                    None => break,
-                }
-            } else {
-                tokio::select! {
-                    // Branch 1: Send outgoing messages
-                    Some(response) = channel_rx.recv() => {
-                        self.forward_response(response).await;
-                    }
-
-                    // Branch 2: Graceful shutdown
-                    _ = shutdown_signal.changed() => {
-                        if *shutdown_signal.borrow() {
-                            log::info!("ChannelHandler sender received shutdown signal, draining pending responses...");
-                            draining = true;
-                        }
-                    }
-                }
+            match channel_rx.recv().await {
+                Some(response) => self.forward_response(response).await,
+                None => break,
             }
         }
 

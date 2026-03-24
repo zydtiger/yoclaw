@@ -115,7 +115,10 @@ impl Agent {
                         // Send progress update before calling tool
                         let progress_msg = ChannelResponse {
                             task_id,
-                            payload: format!("🔧 Calling {}...", tool_call.function.name),
+                            payload: format!(
+                                "🔧 Calling `{}` with args:\n```json\n{}\n```",
+                                tool_call.function.name, tool_call.function.arguments
+                            ),
                             status: ResponseStatus::Continue,
                         };
                         if let Err(e) = self.channel_tx.send(progress_msg).await {

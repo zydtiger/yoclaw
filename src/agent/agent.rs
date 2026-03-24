@@ -112,17 +112,19 @@ impl Agent {
                     };
 
                     for tool_call in tool_calls {
-                        // Send progress update before calling tool
-                        let progress_msg = ChannelResponse {
-                            task_id,
-                            payload: format!(
-                                "🔧 Calling `{}` with args:\n```json\n{}\n```",
-                                tool_call.function.name, tool_call.function.arguments
-                            ),
-                            status: ResponseStatus::Continue,
-                        };
-                        if let Err(e) = self.channel_tx.send(progress_msg).await {
-                            log::error!("Failed to send updates: {}", e);
+                        // Tool-call progress is noisy for normal runs, so only surface it in debug mode.
+                        if self.debug_mode {
+                            let progress_msg = ChannelResponse {
+                                task_id,
+                                payload: format!(
+                                    "🔧 Calling `{}` with args:\n```json\n{}\n```",
+                                    tool_call.function.name, tool_call.function.arguments
+                                ),
+                                status: ResponseStatus::Continue,
+                            };
+                            if let Err(e) = self.channel_tx.send(progress_msg).await {
+                                log::error!("Failed to send updates: {}", e);
+                            }
                         }
 
                         log::info!("Calling tool: {}", tool_call.function.name);

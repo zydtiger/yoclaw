@@ -54,52 +54,37 @@ impl TelegramChannel {
     fn api_url(&self, method: &str) -> String {
         format!("{}/bot{}/{}", TELEGRAM_API_URL, self.token, method)
     }
-}
 
-#[async_trait]
-impl Channel for TelegramChannel {
-    async fn send_message(
-        &self,
-        recipient_id: &str,
-        content: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let url = self.api_url("sendMessage");
-
-        // Convert standard Markdown to Telegram's MarkdownV2 dialect
-        let mut use_markdown = true;
-        let md_v2_content = telegram_markdown_v2::convert_with_strategy(
-            content,
-            telegram_markdown_v2::UnsupportedTagsStrategy::Escape,
-        )
-        .unwrap_or_else(|e| {
-            // Log issue and fallback to string (will likely get rejected by TG API if it has bad unescaped chars, but we avoid a full panic)
-            log::error!(
-                "Failed to convert markdown to MarkdownV2: {}. Using raw content.",
-                e
-            );
-            use_markdown = false;
-            content.to_string()
-        });
-
-        // Ensure message doesn't exceed Telegram's MAX_MESSAGE_LEN limit
-        let truncated_content = if md_v2_content.len() > MAX_MESSAGE_LEN {
+    fn truncate_content(&self, content: &str) -> String {
+        if content.len() > MAX_MESSAGE_LEN {
             log::warn!(
                 "Message exceeds MAX_MESSAGE_LEN ({} > {}). Truncating to {} bytes.",
-                md_v2_content.len(),
+                content.len(),
                 MAX_MESSAGE_LEN,
                 MAX_MESSAGE_LEN
             );
             let warning_msg = "\n...TOO LONG FOR TELEGRAM";
-            md_v2_content[..MAX_MESSAGE_LEN - warning_msg.len()].to_string() + warning_msg
+            content[..MAX_MESSAGE_LEN - warning_msg.len()].to_string() + warning_msg
         } else {
-            md_v2_content
-        };
+            content.to_string()
+        }
+    }
 
-        let req_body = serde_json::json!({
+    async fn send_telegram_message(
+        &self,
+        recipient_id: &str,
+        content: &str,
+        parse_mode: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = self.api_url("sendMessage");
+        let mut req_body = serde_json::json!({
             "chat_id": recipient_id,
-            "text": truncated_content,
-            "parse_mode": if use_markdown {"MarkdownV2"} else {"plain_text"},
+            "text": self.truncate_content(content),
         });
+
+        if let Some(parse_mode) = parse_mode {
+            req_body["parse_mode"] = serde_json::Value::String(parse_mode.to_string());
+        }
 
         let response = self
             .client
@@ -112,6 +97,41 @@ impl Channel for TelegramChannel {
 
         if !response.ok {
             return Err(format!("Telegram API error: {:?}", response.description).into());
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Channel for TelegramChannel {
+    async fn send_message(
+        &self,
+        recipient_id: &str,
+        content: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Convert standard Markdown to Telegram's MarkdownV2 dialect
+        let md_v2_content = match telegram_markdown_v2::convert_with_strategy(
+            content,
+            telegram_markdown_v2::UnsupportedTagsStrategy::Escape,
+        ) {
+            Ok(content) => content,
+            Err(e) => {
+                log::error!("Failed to convert markdown to MarkdownV2: {}", e);
+                self.send_telegram_message(recipient_id, "Failed to send MarkdownV2", None)
+                    .await?;
+                return self.send_telegram_message(recipient_id, content, None).await;
+            }
+        };
+
+        if let Err(e) = self
+            .send_telegram_message(recipient_id, &md_v2_content, Some("MarkdownV2"))
+            .await
+        {
+            log::error!("Failed to send MarkdownV2 message: {}", e);
+            self.send_telegram_message(recipient_id, "Failed to send MarkdownV2", None)
+                .await?;
+            return self.send_telegram_message(recipient_id, content, None).await;
         }
 
         Ok(())

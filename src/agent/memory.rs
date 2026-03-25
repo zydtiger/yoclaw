@@ -29,7 +29,7 @@ impl MemoryStore {
         )?;
 
         // Initialize the vector virtual table
-        // We assume 1536 as the default embedding size (e.g. for OpenAI models)
+        // We assume 4096 as the default embedding size (e.g. for OpenAI models)
         conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
                 embedding float[4096] distance_metric=cosine
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn test_add_memory() {
         let store = MemoryStore::new(":memory:").expect("Failed to create memory store");
-        let dummy_embedding = vec![0.1f32; 1536];
+        let dummy_embedding = vec![0.1f32; 4096];
 
         let id1 = store
             .add_memory(
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_remove_memory() {
         let store = MemoryStore::new(":memory:").expect("Failed to create memory store");
-        let dummy_embedding = vec![0.1f32; 1536];
+        let dummy_embedding = vec![0.1f32; 4096];
 
         store
             .add_memory("Memory to retain", &dummy_embedding)
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn test_search_memory() {
         let store = MemoryStore::new(":memory:").expect("Failed to create memory store");
-        let dummy_embedding = vec![0.1f32; 1536];
+        let dummy_embedding = vec![0.1f32; 4096];
 
         store
             .add_memory("Lorem ipsum dolor sit amet", &dummy_embedding)

@@ -1,0 +1,15 @@
+[Unit]
+Description=YoClaw Agent Service
+
+[Container]
+ContainerName=yoclaw
+Image=localhost/yoclaw:latest
+Network=host
+Volume=%h/.yoclaw:/root/.yoclaw:Z
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

@@ -44,10 +44,7 @@ impl ChannelHandler {
         let task_routes = self.task_routes.lock().await;
         let json = serde_json::to_string_pretty(&*task_routes)?;
         tokio::fs::write(&route_path, json).await?;
-        log::info!(
-            "Saved {} task route(s) to routes.json",
-            task_routes.len()
-        );
+        log::info!("Saved {} task route(s) to routes.json", task_routes.len());
         Ok(())
     }
 
@@ -68,7 +65,10 @@ impl ChannelHandler {
         };
 
         if chat_id.is_empty() {
-            log::error!("Failed to route message for task {}: chat_id is empty", task_id);
+            log::error!(
+                "Failed to route message for task {}: chat_id is empty",
+                task_id
+            );
             return;
         }
 
@@ -155,10 +155,7 @@ impl ChannelHandler {
         }
     }
 
-    pub async fn start_sending(
-        self,
-        mut channel_rx: tokio::sync::mpsc::Receiver<ChannelResponse>,
-    ) {
+    pub async fn start_sending(self, mut channel_rx: tokio::sync::mpsc::Receiver<ChannelResponse>) {
         loop {
             match channel_rx.recv().await {
                 Some(response) => self.forward_response(response).await,

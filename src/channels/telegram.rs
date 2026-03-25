@@ -120,7 +120,9 @@ impl Channel for TelegramChannel {
                 log::error!("Failed to convert markdown to MarkdownV2: {}", e);
                 self.send_telegram_message(recipient_id, "Failed to send MarkdownV2", None)
                     .await?;
-                return self.send_telegram_message(recipient_id, content, None).await;
+                return self
+                    .send_telegram_message(recipient_id, content, None)
+                    .await;
             }
         };
 
@@ -131,7 +133,9 @@ impl Channel for TelegramChannel {
             log::error!("Failed to send MarkdownV2 message: {}", e);
             self.send_telegram_message(recipient_id, "Failed to send MarkdownV2", None)
                 .await?;
-            return self.send_telegram_message(recipient_id, content, None).await;
+            return self
+                .send_telegram_message(recipient_id, content, None)
+                .await;
         }
 
         Ok(())
@@ -242,7 +246,7 @@ impl Channel for TelegramChannel {
         commands: Vec<super::BotCommand>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = self.api_url("setMyCommands");
-        
+
         let req_body = serde_json::json!({
             "commands": commands
         });
@@ -257,7 +261,11 @@ impl Channel for TelegramChannel {
             .await?;
 
         if !response.ok {
-            return Err(format!("Telegram API error setting commands: {:?}", response.description).into());
+            return Err(format!(
+                "Telegram API error setting commands: {:?}",
+                response.description
+            )
+            .into());
         }
 
         Ok(())

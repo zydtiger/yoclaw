@@ -8,6 +8,7 @@ Network=host
 Volume=%h/.yoclaw:/root/.yoclaw:Z
 
 [Service]
+ExecStartPre=/usr/bin/mkdir -p %h/.yoclaw
 Restart=always
 TimeoutStartSec=300
 

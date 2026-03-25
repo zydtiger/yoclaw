@@ -13,6 +13,15 @@ impl fmt::Display for ConfigError {
     }
 }
 
+impl std::error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidFormat(e) => Some(e),
+            Self::FsError(e) => Some(e),
+        }
+    }
+}
+
 impl Config {
     /// Get the config file path from CONFIG_PATH environment variable
     fn get_config_path() -> PathBuf {

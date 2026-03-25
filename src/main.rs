@@ -1,23 +1,51 @@
+use clap::Parser;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
 use crate::agent::Agent;
 use crate::channels::telegram::TelegramChannel;
 use crate::channels::{Channel, ChannelHandler, ChannelResponse, ResponseStatus};
+use crate::cli::{Cli, Commands, SkillCommands};
 use crate::tasks::create_task_channel;
 
 mod agent;
 mod channels;
+mod cli;
 mod config;
 mod globals;
 mod tasks;
 
-/// Main function demonstrating tool integration with an OpenAI-compatible endpoint.
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let config = config::Config::load().await.expect("Failed to load config");
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        Some(Commands::Skill {
+            command: SkillCommands::Add { source },
+        }) => run_skill_add(source).await,
+        None => run_runtime().await,
+    };
+
+    if let Err(error) = result {
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
+}
+
+async fn run_skill_add(source: crate::cli::SkillSource) -> Result<(), Box<dyn std::error::Error>> {
+    let installed = crate::agent::skills::install::install_skill(&source).await?;
+    println!(
+        "Installed skill '{}' at {}",
+        installed.name,
+        installed.path.display()
+    );
+    Ok(())
+}
+
+async fn run_runtime() -> Result<(), Box<dyn std::error::Error>> {
+    let config = config::Config::load().await?;
 
     // Create Telegram channel
     let telegram_token = config.channels.telegram_token.clone();
@@ -134,4 +162,5 @@ async fn main() {
     let _ = sender_task.await;
 
     log::info!("Application shutdown complete");
+    Ok(())
 }

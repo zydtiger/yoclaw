@@ -7,7 +7,7 @@ mod agent;
 mod embedding;
 mod memory;
 mod message;
-mod skills;
+pub mod skills;
 mod tools;
 
 use tools::{Tool, ToolCall};

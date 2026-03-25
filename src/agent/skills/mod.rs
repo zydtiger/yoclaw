@@ -1,3 +1,4 @@
+pub mod install;
 pub mod store;
 
 #[derive(Debug, Clone)]

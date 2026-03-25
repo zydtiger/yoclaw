@@ -36,11 +36,7 @@ async fn main() {
 
 async fn run_skill_add(source: crate::cli::SkillSource) -> Result<(), Box<dyn std::error::Error>> {
     let installed = crate::agent::skills::install::install_skill(&source).await?;
-    println!(
-        "Installed skill '{}' at {}",
-        installed.name,
-        installed.path.display()
-    );
+    println!("Installed skill '{}' at {}", installed.name, installed.path);
     Ok(())
 }
 

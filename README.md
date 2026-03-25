@@ -51,6 +51,18 @@ recv_confirm = "👍"
 cargo run --release
 ```
 
+### Install Skills from the CLI
+
+You can manage local skills without starting the bot runtime:
+
+```bash
+cargo run -- skill add dir:/path/to/skill
+cargo run -- skill add zip:/path/to/skill.zip
+cargo run -- skill add zip:https://example.com/skill.zip
+```
+
+Installed skills are copied into `CONFIG_PATH/skills` (or `~/.yoclaw/skills` by default).
+
 ### Option 2: Run in Docker or Podman
 
 1. Create the config first, either by running `cargo run` once or by writing `~/.yoclaw/config.toml` manually.
@@ -189,6 +201,7 @@ Tasks are managed by [src/tasks/processor.rs](src/tasks/processor.rs) and [src/t
 - Semantic memory is stored in `memory.db` under the config directory.
 - Skills are loaded from `skills/` under the config directory.
 - A skill can be either a subdirectory containing `SKILL.md` or a direct Markdown file.
+- `yoclaw skill add ...` installs managed skills into that same `skills/` directory.
 
 ## Telegram Commands
 

@@ -4,6 +4,8 @@ use serde_json::{json, Value};
 use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
 use crate::channels::{ChannelResponse, ResponseStatus};
 
+const SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
+
 impl Agent {
     pub async fn new(
         agent_config: &crate::config::AgentConfig,
@@ -22,7 +24,7 @@ impl Agent {
         };
         let parsed_url = parsed_url.join("chat/completions")?;
 
-        let mut system_prompt = agent_config.system_prompt.clone();
+        let mut system_prompt = format!("{}\n\n{}", SYSTEM_PROMPT, agent_config.system_prompt);
 
         let mut skill_store = crate::agent::skills::SkillStore::default();
         // Load Anthropic-compatible skills context

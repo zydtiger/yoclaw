@@ -1,5 +1,6 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
 
 use crate::channels::ChannelResponse;
 
@@ -46,9 +47,9 @@ pub struct GenerationMetrics {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UsageMetrics {
-    pub completion_tokens: i32,
-    pub prompt_tokens: i32,
-    pub total_tokens: i32,
+    pub completion_tokens: u32,
+    pub prompt_tokens: u32,
+    pub total_tokens: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -98,6 +99,44 @@ pub struct Message {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+#[derive(Debug, Default)]
+pub struct MessageHistory {
+    entries: Vec<Message>,
+    pub total_tokens: u32,
+}
+
+impl MessageHistory {
+    pub fn new(entries: Vec<Message>) -> Self {
+        Self {
+            entries,
+            total_tokens: 0,
+        }
+    }
+}
+
+impl Deref for MessageHistory {
+    type Target = Vec<Message>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl DerefMut for MessageHistory {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.entries
+    }
+}
+
+impl Serialize for MessageHistory {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.entries.serialize(serializer)
+    }
+}
+
 /// Agent struct
 #[derive(Debug)]
 pub struct Agent {
@@ -105,6 +144,7 @@ pub struct Agent {
     pub api_url: Url,
     pub api_key: String,
     pub model: String,
+    pub context_size: u32,
     pub debug_mode: bool,
 
     // Tool call related
@@ -112,7 +152,7 @@ pub struct Agent {
     pub skill_store: crate::agent::skills::SkillStore,
     pub tools: Vec<Tool>,
     pub client: Client,
-    pub messages: Vec<Message>,
+    pub messages: MessageHistory,
     pub task_manager: std::sync::Arc<crate::tasks::TaskManager>,
     pub memory_store: MemoryStore,
     pub embedding: Embedding,

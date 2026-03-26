@@ -7,6 +7,7 @@ pub struct AgentConfig {
     pub openai_api_base_url: String,
     pub openai_api_key: String,
     pub openai_model: String,
+    pub context_size: u32,
     pub system_prompt: String,
     pub debug_mode: bool,
 }

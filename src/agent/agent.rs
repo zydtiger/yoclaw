@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::agent::{tools, Agent, FinishReason, Message, Response, Role};
+use crate::agent::{tools, Agent, FinishReason, Message, MessageHistory, Response, Role};
 use crate::channels::{ChannelResponse, ResponseStatus};
 
 const SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
@@ -46,13 +46,14 @@ impl Agent {
             api_url: parsed_url,
             api_key: agent_config.openai_api_key.clone(),
             model: agent_config.openai_model.clone(),
+            context_size: agent_config.context_size,
             debug_mode: agent_config.debug_mode,
 
             environment,
             skill_store,
             tools: tools::get_all_tools(),
             client: Client::new(),
-            messages: vec![Message::new(Role::System, system_prompt)],
+            messages: MessageHistory::new(vec![Message::new(Role::System, system_prompt)]),
             task_manager,
             memory_store,
             embedding,
@@ -97,6 +98,7 @@ impl Agent {
                 Ok(res) => res,
                 Err(e) => return format!("Error: {e}"),
             };
+            self.messages.total_tokens = response.usage.total_tokens;
 
             // NOTE: Only process first choice, assumed to be the only one
             let choice = match response.choices.first() {

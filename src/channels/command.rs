@@ -16,6 +16,10 @@ impl super::CommandManager {
                 command: "skills".to_string(),
                 description: "List loaded skills".to_string(),
             },
+            BotCommand {
+                command: "context".to_string(),
+                description: "Show current context usage".to_string(),
+            },
         ];
 
         Self { commands }
@@ -67,6 +71,15 @@ impl super::CommandManager {
                         .collect();
                     format!("Loaded skills:\n{}", numbered_skills.join("\n"))
                 }
+            }
+            "/context" => {
+                let used_tokens = agent.messages.total_tokens;
+                let context_size = agent.context_size;
+                let usage_percent = (used_tokens as f64 / context_size as f64) * 100.0;
+                format!(
+                    "Context usage: {:.1}% ({}/{})",
+                    usage_percent, used_tokens, context_size
+                )
             }
             _ => return None,
         };

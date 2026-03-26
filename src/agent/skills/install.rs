@@ -147,7 +147,8 @@ async fn prepare_skill_source(
 
 /// Validates that the directory contains a valid SKILL.md file.
 async fn prepare_directory_source(path: &Path) -> Result<PreparedSkillSource, SkillInstallError> {
-    let metadata = fs::metadata(path)
+    let path = expand_install_source_path(&path.to_string_lossy());
+    let metadata = fs::metadata(&path)
         .await
         .map_err(|source| SkillInstallError::Io {
             context: format!("Failed to read skill directory {}", path.display()),
@@ -159,7 +160,7 @@ async fn prepare_directory_source(path: &Path) -> Result<PreparedSkillSource, Sk
     }
 
     // Ensure the directory contains a valid SKILL.md
-    ensure_skill_file(path).await?;
+    ensure_skill_file(&path).await?;
 
     Ok(PreparedSkillSource {
         root: path.to_path_buf(),
@@ -198,11 +199,11 @@ async fn prepare_zip_source(source: &str) -> Result<PreparedSkillSource, SkillIn
             })?
             .to_vec()
     } else {
-        let zip_path = source.to_string();
-        fs::read(source)
+        let zip_path = expand_install_source_path(source);
+        fs::read(&zip_path)
             .await
             .map_err(|error| SkillInstallError::Io {
-                context: format!("Failed to read zip file {zip_path}"),
+                context: format!("Failed to read zip file {}", zip_path.display()),
                 source: error,
             })?
     };
@@ -339,6 +340,80 @@ fn is_remote_zip(source: &str) -> bool {
         && (source.starts_with("http://") || source.starts_with("https://"))
 }
 
+/// Expands shell-style shortcuts in local install paths before filesystem access.
+fn expand_install_source_path(source: &str) -> PathBuf {
+    expand_env_vars(&expand_home_shortcut(source))
+}
+
+/// Expands `~` and `~/...` to the current user's home directory.
+fn expand_home_shortcut(source: &str) -> PathBuf {
+    match source {
+        "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from(source)),
+        _ => {
+            if let Some(rest) = source
+                .strip_prefix("~/")
+                .or_else(|| source.strip_prefix("~\\"))
+            {
+                dirs::home_dir()
+                    .map(|home| home.join(rest))
+                    .unwrap_or_else(|| PathBuf::from(source))
+            } else {
+                return PathBuf::from(source);
+            }
+        }
+    }
+}
+
+/// Expands every `$VAR` and `${VAR}` occurrence, leaving unknown variables unchanged.
+fn expand_env_vars(path: &Path) -> PathBuf {
+    let source = path.to_string_lossy();
+    let mut expanded = String::with_capacity(source.len());
+    let mut cursor = source.as_ref();
+
+    while let Some(marker_index) = cursor.find('$') {
+        expanded.push_str(&cursor[..marker_index]);
+        let variable = &cursor[marker_index..];
+
+        if let Some((name, rest, token_len)) = parse_env_var(variable) {
+            if let Some(value) = std::env::var_os(name) {
+                expanded.push_str(&value.to_string_lossy());
+            } else {
+                expanded.push_str(&variable[..token_len]);
+            }
+            cursor = rest;
+        } else {
+            expanded.push('$');
+            cursor = &variable['$'.len_utf8()..];
+        }
+    }
+
+    expanded.push_str(cursor);
+    PathBuf::from(expanded)
+}
+
+/// Parses a single environment-variable token from the start of `source`.
+fn parse_env_var(source: &str) -> Option<(&str, &str, usize)> {
+    if let Some(rest) = source.strip_prefix("${") {
+        let end = rest.find('}')?;
+        let name = &rest[..end];
+        if name.is_empty() {
+            return None;
+        }
+        return Some((name, &rest[end + 1..], end + 3));
+    }
+
+    let rest = source.strip_prefix('$')?;
+    let end = rest
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .unwrap_or(rest.len());
+
+    if end == 0 {
+        return None;
+    }
+
+    Some((&rest[..end], &rest[end..], end + 1))
+}
+
 /// Maps SkillLoadError to SkillInstallError variants.
 fn map_skill_load_error(error: SkillLoadError) -> SkillInstallError {
     match error {
@@ -456,7 +531,7 @@ mod tests {
 
     use crate::cli::SkillSource;
 
-    use super::{install_skill, SkillInstallError};
+    use super::{expand_install_source_path, install_skill, SkillInstallError};
 
     static TEST_LOCK: LazyLock<std::sync::Mutex<()>> = LazyLock::new(|| std::sync::Mutex::new(()));
     static TEST_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -660,6 +735,41 @@ mod tests {
         assert!(!super::is_remote_zip("/tmp/skill.zip"));
     }
 
+    #[test]
+    fn expands_home_shortcuts_for_install_paths() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let home_dir = TestDir::new("home");
+        let previous_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home_dir.path);
+
+        let expanded = expand_install_source_path("~/Downloads/tavily-search");
+
+        restore_env_var("HOME", previous_home);
+        assert_eq!(expanded, home_dir.path.join("Downloads/tavily-search"));
+    }
+
+    #[test]
+    fn expands_env_vars_for_install_paths() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let source_dir = TestDir::new("env-root");
+        let previous_root = std::env::var_os("YOCLAW_SKILL_TEST_ROOT");
+        std::env::set_var("YOCLAW_SKILL_TEST_ROOT", &source_dir.path);
+
+        let expanded = expand_install_source_path("$YOCLAW_SKILL_TEST_ROOT/skill-dir");
+        let braced = expand_install_source_path("${YOCLAW_SKILL_TEST_ROOT}/skill-dir");
+        let nested = expand_install_source_path("prefix/$YOCLAW_SKILL_TEST_ROOT/skill-dir");
+
+        restore_env_var("YOCLAW_SKILL_TEST_ROOT", previous_root);
+        assert_eq!(expanded, source_dir.path.join("skill-dir"));
+        assert_eq!(braced, source_dir.path.join("skill-dir"));
+        assert_eq!(
+            nested,
+            PathBuf::from("prefix")
+                .join(&source_dir.path)
+                .join("skill-dir")
+        );
+    }
+
     async fn reset_test_config_dir() -> PathBuf {
         let config_dir = test_config_dir().clone();
         let skills_dir = config_dir.join("skills");
@@ -718,5 +828,12 @@ mod tests {
         }
 
         zip.finish().expect("zip file should finish");
+    }
+
+    fn restore_env_var(name: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
     }
 }

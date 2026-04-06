@@ -61,6 +61,10 @@ impl Agent {
         })
     }
 
+    pub fn clear_history(&mut self) {
+        self.messages.clear_preserving_system();
+    }
+
     /// Call an OpenAI-compatible API with tool support.
     async fn call(&self) -> Result<Response, String> {
         let payload = json!({
@@ -91,28 +95,45 @@ impl Agent {
     }
 
     pub async fn start_task(&mut self, task_id: crate::tasks::TaskId, content: String) -> String {
+        let task_start_offset = self.messages.len();
         self.messages.push(Message::new(Role::User, content));
 
         loop {
             let response = match self.call().await {
                 Ok(res) => res,
-                Err(e) => return format!("Error: {e}"),
+                Err(e) => {
+                    let error = format!("Error: {e}");
+                    self.messages
+                        .compact_task_messages(task_start_offset, error.clone());
+                    return error;
+                }
             };
             self.messages.total_tokens = response.usage.total_tokens;
 
             // NOTE: Only process first choice, assumed to be the only one
             let choice = match response.choices.first() {
                 Some(c) => c,
-                None => return "Error: Response choices is empty".into(),
+                None => {
+                    let error = "Error: Response choices is empty".to_string();
+                    self.messages
+                        .compact_task_messages(task_start_offset, error.clone());
+                    return error;
+                }
             };
 
-            self.messages.push(choice.message.clone());
+            let assistant_message = choice.message.clone();
+            self.messages.push(assistant_message.clone());
 
             match &choice.finish_reason {
                 FinishReason::ToolCalls => {
-                    let tool_calls = match &choice.message.tool_calls {
+                    let tool_calls = match &assistant_message.tool_calls {
                         Some(tc) if !tc.is_empty() => tc,
-                        _ => return "Error: Tool call expected but not found".into(),
+                        _ => {
+                            let error = "Error: Tool call expected but not found".to_string();
+                            self.messages
+                                .compact_task_messages(task_start_offset, error.clone());
+                            return error;
+                        }
                     };
 
                     for tool_call in tool_calls {
@@ -149,26 +170,224 @@ impl Agent {
                     }
                 }
                 _ => {
-                    // Standard Text Response
-                    let content = choice.message.content.clone();
-                    if let Some(s) = content {
-                        if self.debug_mode {
-                            let debug_info = json!({
-                                "timings": response.timings,
-                                "usage": response.usage
-                            });
-                            let formatted = serde_json::to_string_pretty(&debug_info)
-                                .unwrap_or_else(|_e| {
-                                    format!("{{\"error\":\"Failed to format debug info\"}}")
-                                });
-                            return format!("{}\n\n{}", s, formatted);
+                    let content = match assistant_message.content.clone() {
+                        Some(content) => content,
+                        None => {
+                            let error = "Error: Empty message".to_string();
+                            self.messages
+                                .compact_task_messages(task_start_offset, error.clone());
+                            return error;
                         }
-                        return s;
-                    } else {
-                        return "Error: Empty message".into();
+                    };
+
+                    self.messages
+                        .compact_task_messages(task_start_offset, content.clone());
+
+                    if self.debug_mode {
+                        let debug_info = json!({
+                            "timings": response.timings,
+                            "usage": response.usage
+                        });
+                        let formatted =
+                            serde_json::to_string_pretty(&debug_info).unwrap_or_else(|_e| {
+                                format!("{{\"error\":\"Failed to format debug info\"}}")
+                            });
+                        return format!("{}\n\n{}", content, formatted);
                     }
+
+                    return content;
                 }
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl Agent {
+        pub(crate) fn new_for_tests(system_prompt: &str, context_size: u32) -> Self {
+            let (task_tx, _task_rx) = tokio::sync::mpsc::channel(1);
+            let (channel_tx, _channel_rx) = tokio::sync::mpsc::channel(1);
+
+            Self {
+                api_url: reqwest::Url::parse("http://localhost/v1/chat/completions")
+                    .expect("test API URL should parse"),
+                api_key: "test-key".to_string(),
+                model: "test-model".to_string(),
+                context_size,
+                debug_mode: false,
+                environment: std::collections::HashMap::new(),
+                skill_store: crate::agent::skills::SkillStore::default(),
+                tools: vec![],
+                client: reqwest::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .expect("test client should build"),
+                messages: MessageHistory::new(vec![Message::new(
+                    Role::System,
+                    system_prompt.to_string(),
+                )]),
+                task_manager: std::sync::Arc::new(crate::tasks::TaskManager::new(task_tx)),
+                memory_store: crate::agent::MemoryStore::new(":memory:")
+                    .expect("test memory store should initialize"),
+                embedding: crate::agent::Embedding {
+                    api_url: reqwest::Url::parse("http://localhost/v1")
+                        .expect("test embedding URL should parse"),
+                    api_key: "test-key".to_string(),
+                    model: "test-embedding-model".to_string(),
+                    client: reqwest::Client::builder()
+                        .no_proxy()
+                        .build()
+                        .expect("test embedding client should build"),
+                },
+                channel_tx,
+            }
+        }
+    }
+
+    #[test]
+    fn compact_task_messages_drops_tool_intermediates() {
+        let mut history = MessageHistory::new(vec![
+            Message::new(Role::System, "system".to_string()),
+            Message::new(Role::User, "previous user".to_string()),
+            Message::new(Role::Assistant, "previous assistant".to_string()),
+        ]);
+        let task_start_offset = history.len();
+
+        history.push(Message::new(Role::User, "new task".to_string()));
+        history.push(Message {
+            role: Role::Assistant,
+            content: None,
+            reasoning_content: None,
+            name: None,
+            tool_call_id: None,
+            tool_calls: Some(vec![]),
+        });
+        history.push(
+            Message::new(Role::Tool, "tool output".to_string())
+                .with_name("shell".to_string())
+                .with_tool_call_id("call_1".to_string()),
+        );
+        history.push(Message::new(Role::Assistant, "final assistant".to_string()));
+
+        history.compact_task_messages(task_start_offset, "final assistant".to_string());
+
+        assert_eq!(history.len(), 5);
+        assert_eq!(history[0].role, Role::System);
+        assert_eq!(history[1].role, Role::User);
+        assert_eq!(history[2].role, Role::Assistant);
+        assert_eq!(history[3].role, Role::User);
+        assert_eq!(history[3].content.as_deref(), Some("new task"));
+        assert_eq!(history[4].role, Role::Assistant);
+        assert_eq!(history[4].content.as_deref(), Some("final assistant"));
+    }
+
+    #[test]
+    fn compact_task_messages_keeps_no_tool_exchange() {
+        let mut history =
+            MessageHistory::new(vec![Message::new(Role::System, "system".to_string())]);
+        let task_start_offset = history.len();
+
+        history.push(Message::new(Role::User, "question".to_string()));
+        history.push(Message::new(Role::Assistant, "answer".to_string()));
+
+        history.compact_task_messages(task_start_offset, "answer".to_string());
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[1].role, Role::User);
+        assert_eq!(history[1].content.as_deref(), Some("question"));
+        assert_eq!(history[2].role, Role::Assistant);
+        assert_eq!(history[2].content.as_deref(), Some("answer"));
+    }
+
+    #[test]
+    fn compact_task_messages_preserves_error_exchange_only() {
+        let mut history =
+            MessageHistory::new(vec![Message::new(Role::System, "system".to_string())]);
+        let task_start_offset = history.len();
+
+        history.push(Message::new(Role::User, "broken task".to_string()));
+        history.push(Message {
+            role: Role::Assistant,
+            content: None,
+            reasoning_content: None,
+            name: None,
+            tool_call_id: None,
+            tool_calls: Some(vec![]),
+        });
+        history.push(Message::new(Role::Tool, "partial output".to_string()));
+
+        history.compact_task_messages(task_start_offset, "Error: request failed".to_string());
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[1].role, Role::User);
+        assert_eq!(history[1].content.as_deref(), Some("broken task"));
+        assert_eq!(history[2].role, Role::Assistant);
+        assert_eq!(history[2].content.as_deref(), Some("Error: request failed"));
+    }
+
+    #[test]
+    fn compact_task_messages_keeps_long_lived_history_visible_across_runs() {
+        let mut history =
+            MessageHistory::new(vec![Message::new(Role::System, "system".to_string())]);
+
+        let first_task_offset = history.len();
+        history.push(Message::new(Role::User, "first task".to_string()));
+        history.push(Message::new(Role::Assistant, "first answer".to_string()));
+        history.compact_task_messages(first_task_offset, "first answer".to_string());
+
+        let second_task_offset = history.len();
+        history.push(Message::new(Role::User, "second task".to_string()));
+        history.push(Message {
+            role: Role::Assistant,
+            content: None,
+            reasoning_content: None,
+            name: None,
+            tool_call_id: None,
+            tool_calls: Some(vec![]),
+        });
+        history.push(Message::new(Role::Tool, "tool output".to_string()));
+        history.push(Message::new(Role::Assistant, "second answer".to_string()));
+        history.compact_task_messages(second_task_offset, "second answer".to_string());
+
+        assert_eq!(history.len(), 5);
+        assert_eq!(history[0].role, Role::System);
+        assert_eq!(history[1].content.as_deref(), Some("first task"));
+        assert_eq!(history[2].content.as_deref(), Some("first answer"));
+        assert_eq!(history[3].content.as_deref(), Some("second task"));
+        assert_eq!(history[4].content.as_deref(), Some("second answer"));
+        assert!(history.iter().all(|message| message.role != Role::Tool));
+    }
+
+    #[test]
+    fn clear_preserving_system_removes_conversation_and_resets_tokens() {
+        let mut history = MessageHistory::new(vec![
+            Message::new(Role::System, "system".to_string()),
+            Message::new(Role::User, "question".to_string()),
+            Message::new(Role::Assistant, "answer".to_string()),
+        ]);
+        history.total_tokens = 321;
+
+        history.clear_preserving_system();
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].role, Role::System);
+        assert_eq!(history[0].content.as_deref(), Some("system"));
+        assert_eq!(history.total_tokens, 0);
+    }
+
+    #[test]
+    fn clear_preserving_system_is_stable_for_minimal_history() {
+        let mut history =
+            MessageHistory::new(vec![Message::new(Role::System, "system".to_string())]);
+        history.total_tokens = 42;
+
+        history.clear_preserving_system();
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].role, Role::System);
+        assert_eq!(history.total_tokens, 0);
     }
 }

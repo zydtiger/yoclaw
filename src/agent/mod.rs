@@ -105,15 +105,6 @@ pub struct MessageHistory {
     pub total_tokens: u32,
 }
 
-impl MessageHistory {
-    pub fn new(entries: Vec<Message>) -> Self {
-        Self {
-            entries,
-            total_tokens: 0,
-        }
-    }
-}
-
 impl Deref for MessageHistory {
     type Target = Vec<Message>;
 

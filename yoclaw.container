@@ -5,6 +5,7 @@ Description=YoClaw Agent Service
 ContainerName=yoclaw
 Image=localhost/yoclaw:latest
 Network=host
+Volume=/etc/localtime:/etc/localtime:ro
 Volume=%h/.yoclaw:/root/.yoclaw:Z
 
 [Service]

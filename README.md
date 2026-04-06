@@ -92,6 +92,7 @@ With Podman:
 ```bash
 podman run --rm \
   --network host \
+  -v /etc/localtime:/etc/localtime:ro \
   -v "$HOME/.yoclaw:/root/.yoclaw:Z" \
   localhost/yoclaw:latest
 ```

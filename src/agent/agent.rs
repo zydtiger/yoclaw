@@ -155,6 +155,7 @@ impl Agent {
                         log::info!("Calling tool: {}", tool_call.function.name);
                         let tool_result = tool_call
                             .execute(
+                                task_id,
                                 &self.environment,
                                 &self.skill_store,
                                 self.task_manager.clone(),
@@ -229,7 +230,10 @@ mod tests {
                     Role::System,
                     system_prompt.to_string(),
                 )]),
-                task_manager: std::sync::Arc::new(crate::tasks::TaskManager::new(task_tx)),
+                task_manager: std::sync::Arc::new(crate::tasks::TaskManager::new(
+                    task_tx,
+                    std::sync::Arc::new(crate::tasks::TaskRouter::default()),
+                )),
                 memory_store: crate::agent::MemoryStore::new(":memory:")
                     .expect("test memory store should initialize"),
                 embedding: crate::agent::Embedding {

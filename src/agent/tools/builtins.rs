@@ -167,6 +167,7 @@ pub async fn get_url(args: Value) -> String {
 /// Expects args to be { "payload": string, "delay_seconds": number, "repeat"?: string }
 pub async fn schedule_task(
     args: Value,
+    current_task_id: crate::tasks::TaskId,
     task_manager: std::sync::Arc<crate::tasks::TaskManager>,
 ) -> String {
     let payload = match args.pointer("/payload").and_then(|v| v.as_str()) {
@@ -193,22 +194,14 @@ pub async fn schedule_task(
         payload
     );
 
-    let result = match repeat {
-        Some(repeat) => {
-            task_manager
-                .schedule_repeating_task_in(
-                    payload,
-                    chrono::Duration::seconds(delay_seconds),
-                    repeat,
-                )
-                .await
-        }
-        None => {
-            task_manager
-                .schedule_task_in(payload, chrono::Duration::seconds(delay_seconds))
-                .await
-        }
-    };
+    let result = task_manager
+        .schedule_task(
+            payload,
+            Some(chrono::Duration::seconds(delay_seconds)),
+            repeat,
+            crate::tasks::TaskRouteBinding::Inherit(current_task_id),
+        )
+        .await;
 
     match result {
         Ok(task_id) => {

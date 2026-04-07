@@ -46,6 +46,7 @@ pub struct ToolCall {
 impl ToolCall {
     pub async fn execute(
         &self,
+        current_task_id: crate::tasks::TaskId,
         environment: &std::collections::HashMap<String, String>,
         skill_store: &crate::agent::skills::SkillStore,
         task_manager: std::sync::Arc<crate::tasks::TaskManager>,
@@ -69,7 +70,9 @@ impl ToolCall {
             "read_file" => builtins::read_file(args.clone()).await,
             "write_file" => builtins::write_file(args.clone()).await,
             "get_url" => builtins::get_url(args.clone()).await,
-            "schedule_task" => builtins::schedule_task(args.clone(), task_manager).await,
+            "schedule_task" => {
+                builtins::schedule_task(args.clone(), current_task_id, task_manager).await
+            }
             "cancel_task" => builtins::cancel_task(args.clone(), task_manager).await,
             "list_tasks" => builtins::list_tasks(args.clone(), task_manager).await,
             "add_memory" => builtins::add_memory(args.clone(), embedding, memory_store).await,

@@ -1,5 +1,5 @@
 use std::io::{Cursor, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use tokio::fs;
 
@@ -366,9 +366,27 @@ fn expand_home_shortcut(source: &str) -> PathBuf {
 
 /// Expands every `$VAR` and `${VAR}` occurrence, leaving unknown variables unchanged.
 fn expand_env_vars(path: &Path) -> PathBuf {
-    let source = path.to_string_lossy();
+    let mut expanded = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => expanded.push(prefix.as_os_str()),
+            Component::RootDir => expanded.push(std::path::MAIN_SEPARATOR.to_string()),
+            Component::CurDir => expanded.push("."),
+            Component::ParentDir => expanded.push(".."),
+            Component::Normal(part) => {
+                let part = expand_env_vars_in_fragment(&part.to_string_lossy());
+                expanded.push(part);
+            }
+        }
+    }
+
+    expanded
+}
+
+fn expand_env_vars_in_fragment(source: &str) -> String {
     let mut expanded = String::with_capacity(source.len());
-    let mut cursor = source.as_ref();
+    let mut cursor = source;
 
     while let Some(marker_index) = cursor.find('$') {
         expanded.push_str(&cursor[..marker_index]);
@@ -388,7 +406,7 @@ fn expand_env_vars(path: &Path) -> PathBuf {
     }
 
     expanded.push_str(cursor);
-    PathBuf::from(expanded)
+    expanded
 }
 
 /// Parses a single environment-variable token from the start of `source`.

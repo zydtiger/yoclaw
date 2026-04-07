@@ -1,12 +1,15 @@
 mod manager;
 mod processor;
+mod router;
 
 use chrono::{DateTime, Duration, Local, Utc};
 use serde::{Deserialize, Serialize, Serializer};
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 pub use manager::TaskManager;
 pub use processor::TaskProcessor;
+pub use router::TaskRouter;
 
 /// Create the task management channel pair.
 /// Returns (TaskManager, TaskProcessor) where:
@@ -14,13 +17,41 @@ pub use processor::TaskProcessor;
 /// - TaskProcessor is the receive-side worker that should run in a spawned task
 ///
 /// Note: TaskProcessor::new is async because it loads persisted tasks from disk
-pub async fn create_task_channel() -> (TaskManager, TaskProcessor) {
+pub async fn create_task_channel() -> (TaskManager, TaskProcessor, Arc<TaskRouter>) {
     let (tx, rx) = mpsc::channel::<TaskCommand>(100);
-    (TaskManager::new(tx), TaskProcessor::new(rx).await)
+    let task_router = Arc::new(TaskRouter::new().await);
+    (
+        TaskManager::new(tx, task_router.clone()),
+        TaskProcessor::new(rx, task_router.clone()).await,
+        task_router,
+    )
 }
 
 /// Unique identifier for a task
 pub type TaskId = uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub enum TaskRouteBinding {
+    ChatId(String),
+    Inherit(TaskId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleTaskError {
+    MissingRoute(TaskId),
+    QueueClosed,
+}
+
+impl std::fmt::Display for ScheduleTaskError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingRoute(task_id) => write!(f, "missing route for task {}", task_id),
+            Self::QueueClosed => write!(f, "task processor channel is closed"),
+        }
+    }
+}
+
+impl std::error::Error for ScheduleTaskError {}
 
 pub enum TaskCommand {
     Schedule(Task),
@@ -65,22 +96,12 @@ where
 }
 
 impl Task {
-    /// Create a new task with the given payload (immediate execution)
-    pub fn new(payload: String) -> Self {
+    /// Create a task with an optional delay and repeat interval.
+    pub fn scheduled(payload: String, delay: Option<Duration>, repeat: Option<TaskRepeat>) -> Self {
         Self {
             id: uuid::Uuid::now_v7(),
             payload,
-            deadline: Utc::now(),
-            repeat: None,
-        }
-    }
-
-    /// Create a scheduled task with a delay
-    pub fn scheduled(payload: String, delay: Duration, repeat: Option<TaskRepeat>) -> Self {
-        Self {
-            id: uuid::Uuid::now_v7(),
-            payload,
-            deadline: Utc::now() + delay,
+            deadline: Utc::now() + delay.unwrap_or(Duration::zero()),
             repeat,
         }
     }

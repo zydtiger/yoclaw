@@ -1,23 +1,25 @@
 use chrono::Utc;
 use std::collections::BinaryHeap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, watch};
 use tokio::time::sleep;
 
-use super::{CancelError, Task, TaskCommand, TaskSaveError};
+use super::{CancelError, Task, TaskCommand, TaskRouter, TaskSaveError};
 
 /// TaskProcessor handles the actual task queue and processing in the main loop.
 /// Uses a priority queue (BinaryHeap) to manage tasks by deadline.
 pub struct TaskProcessor {
     task_rx: mpsc::Receiver<TaskCommand>,
     pending_tasks: BinaryHeap<Task>,
+    task_router: Arc<TaskRouter>,
 }
 
 impl TaskProcessor {
     /// Create a new TaskProcessor, loading any persisted tasks from tasks.json
-    pub async fn new(rx: mpsc::Receiver<TaskCommand>) -> Self {
+    pub async fn new(rx: mpsc::Receiver<TaskCommand>, task_router: Arc<TaskRouter>) -> Self {
         let mut pending_tasks = BinaryHeap::new();
 
         // Load persisted tasks from tasks.json
@@ -36,6 +38,7 @@ impl TaskProcessor {
         Self {
             task_rx: rx,
             pending_tasks,
+            task_router,
         }
     }
 
@@ -110,12 +113,19 @@ impl TaskProcessor {
                         if task.is_ready() {
                             let task = self.pending_tasks.pop().unwrap();
                             if let Some(next_task) = task.next_recurrence() {
-                                log::info!(
-                                    "Repeating task #{} rescheduled for {:?}",
-                                    next_task.id,
-                                    next_task.deadline
-                                );
-                                self.pending_tasks.push(next_task);
+                                if self.task_router.copy(&task.id, next_task.id).await.is_some() {
+                                    log::info!(
+                                        "Repeating task #{} rescheduled for {:?}",
+                                        next_task.id,
+                                        next_task.deadline
+                                    );
+                                    self.pending_tasks.push(next_task);
+                                } else {
+                                    log::error!(
+                                        "Skipping repeating task {} because no route was found for the current occurrence",
+                                        task.id
+                                    );
+                                }
                             }
                             agent_tx.send(task).await.expect("Agent worker coroutine died");
                         } else {

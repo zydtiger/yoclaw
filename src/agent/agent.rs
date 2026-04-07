@@ -206,8 +206,7 @@ fn format_tool_call_progress(name: &str, arguments: &Value, debug_mode: bool) ->
         format!(
             "Calling tool `{}`\n```json\n{}\n```",
             name,
-            serde_json::to_string_pretty(arguments)
-                .unwrap_or_else(|_| arguments.to_string())
+            serde_json::to_string_pretty(arguments).unwrap_or_else(|_| arguments.to_string())
         )
     } else {
         format!("Calling tool `{}`", name)
@@ -409,14 +408,16 @@ mod tests {
 
     #[test]
     fn tool_progress_message_hides_arguments_in_normal_mode() {
-        let payload = format_tool_call_progress("schedule_task", &json!({"delay_seconds": 60}), false);
+        let payload =
+            format_tool_call_progress("schedule_task", &json!({"delay_seconds": 60}), false);
 
         assert_eq!(payload, "Calling tool `schedule_task`");
     }
 
     #[test]
     fn tool_progress_message_includes_arguments_in_debug_mode() {
-        let payload = format_tool_call_progress("schedule_task", &json!({"delay_seconds": 60}), true);
+        let payload =
+            format_tool_call_progress("schedule_task", &json!({"delay_seconds": 60}), true);
 
         assert!(payload.starts_with("Calling tool `schedule_task`\n```json\n"));
         assert!(payload.contains("\"delay_seconds\": 60"));

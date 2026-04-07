@@ -130,7 +130,13 @@ async fn run_runtime() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Received command: {}", cmd);
 
             match command_manager
-                .execute(cmd, task.id, &mut agent, task_manager.as_ref(), task_router.as_ref())
+                .execute(
+                    cmd,
+                    task.id,
+                    &mut agent,
+                    task_manager.as_ref(),
+                    task_router.as_ref(),
+                )
                 .await
             {
                 Some(response_text) => response_text,

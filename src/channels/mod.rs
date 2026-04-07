@@ -1,13 +1,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 mod command;
 mod handler;
 pub mod telegram;
 
-use crate::tasks::TaskId;
+use crate::tasks::{TaskId, TaskRouter};
 
 /// A bot command that can be registered with a channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,5 +80,5 @@ pub struct ChannelHandler {
     pub channel: Arc<dyn Channel>,
     pub allowed_users: Vec<String>,
     pub recv_confirm: Option<String>,
-    pub task_routes: Arc<Mutex<std::collections::HashMap<TaskId, String>>>,
+    pub task_router: Arc<TaskRouter>,
 }

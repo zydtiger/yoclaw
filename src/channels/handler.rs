@@ -1,66 +1,36 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 
 use crate::channels::{ChannelResponse, ResponseStatus};
-use crate::tasks::{TaskId, TaskManager};
+use crate::tasks::{TaskManager, TaskRouteBinding, TaskRouter};
 
 use super::{Channel, ChannelHandler};
 
 impl ChannelHandler {
-    pub async fn new(
+    pub fn new(
         channel: Box<dyn Channel>,
         allowed_users: Vec<String>,
         recv_confirm: Option<String>,
+        task_router: Arc<TaskRouter>,
     ) -> Self {
-        let task_routes = Self::load_routes().await.unwrap_or_else(|e| {
-            log::warn!("Failed to load task routes: {}", e);
-            HashMap::new()
-        });
-
         Self {
             channel: Arc::from(channel),
             allowed_users,
             recv_confirm,
-            task_routes: Arc::new(tokio::sync::Mutex::new(task_routes)),
+            task_router,
         }
-    }
-
-    /// Load task routes from routes.json
-    async fn load_routes() -> Result<HashMap<TaskId, String>, Box<dyn std::error::Error>> {
-        let route_path = std::path::PathBuf::from(&*crate::globals::CONFIG_DIR).join("routes.json");
-        if !route_path.exists() {
-            return Ok(HashMap::new());
-        }
-
-        let data = tokio::fs::read_to_string(&route_path).await?;
-        let routes: HashMap<TaskId, String> = serde_json::from_str(&data)?;
-        log::info!("Loaded {} task route(s) from routes.json", routes.len());
-        Ok(routes)
-    }
-
-    /// Save task routes to routes.json
-    async fn save_routes(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let route_path = std::path::PathBuf::from(&*crate::globals::CONFIG_DIR).join("routes.json");
-        let task_routes = self.task_routes.lock().await;
-        let json = serde_json::to_string_pretty(&*task_routes)?;
-        tokio::fs::write(&route_path, json).await?;
-        log::info!("Saved {} task route(s) to routes.json", task_routes.len());
-        Ok(())
     }
 
     async fn forward_response(&self, response: ChannelResponse) {
         let task_id = response.task_id;
-        let chat_id = {
-            let task_routes = self.task_routes.lock().await;
-            match task_routes.get(&task_id) {
-                Some(id) => id.clone(),
-                None => {
-                    log::error!(
-                        "Failed to route message for task {}: no chat_id found in task_routes. Dropping message.",
-                        task_id
-                    );
-                    return;
-                }
+        let chat_id = match self.task_router.get(&task_id).await {
+            Some(id) => id,
+            None => {
+                log::error!(
+                    "Failed to route message for task {}: no chat_id found in task_routes. Dropping message.",
+                    task_id
+                );
+                return;
             }
         };
 
@@ -77,7 +47,7 @@ impl ChannelHandler {
         }
 
         if response.status == ResponseStatus::Terminate {
-            self.task_routes.lock().await.remove(&task_id);
+            self.task_router.remove(&task_id).await;
         }
     }
 
@@ -118,12 +88,13 @@ impl ChannelHandler {
                                 }
 
                                 // Schedule the incoming message as a task for the agent to process
-                                match task_manager.schedule_task(msg.text).await {
+                                match task_manager.schedule_task(
+                                    msg.text,
+                                    None,
+                                    None,
+                                    TaskRouteBinding::ChatId(msg.chat_id.clone()),
+                                ).await {
                                     Ok(task_id) => {
-                                        self.task_routes
-                                            .lock()
-                                            .await
-                                            .insert(task_id, msg.chat_id.clone());
                                         log::info!("Scheduled task #{} for incoming message", task_id);
                                         if let Some(emoji) = &self.recv_confirm {
                                             match self.channel.react_with_emoji(&msg.chat_id, msg.message_id, emoji).await {
@@ -163,7 +134,7 @@ impl ChannelHandler {
             }
         }
 
-        if let Err(e) = self.save_routes().await {
+        if let Err(e) = self.task_router.save().await {
             log::error!("Failed to save routes during sender shutdown: {}", e);
         }
     }

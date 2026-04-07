@@ -42,6 +42,8 @@ async fn run_skill_add(source: crate::cli::SkillSource) -> Result<(), Box<dyn st
 
 async fn run_runtime() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::load().await?;
+    let (task_manager, task_processor, task_router) = create_task_channel().await;
+    let task_manager = Arc::new(task_manager);
 
     // Create Telegram channel
     let telegram_token = config.channels.telegram_token.clone();
@@ -55,13 +57,9 @@ async fn run_runtime() -> Result<(), Box<dyn std::error::Error>> {
         channel,
         config.channels.allowed_users.clone(),
         config.channels.recv_confirm.clone(),
-    )
-    .await;
+        task_router,
+    );
     let (channel_tx, channel_rx) = mpsc::channel::<ChannelResponse>(16);
-
-    // Create task channel pair
-    let (task_manager, task_processor) = create_task_channel().await;
-    let task_manager = Arc::new(task_manager);
 
     // Create MemoryStore and Embedding instances
     let memory_store =

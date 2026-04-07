@@ -1,6 +1,7 @@
 # Yoclaw
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/zydtiger/yoclaw)
+[![Build](https://img.shields.io/github/actions/workflow/status/zydtiger/yoclaw/ci.yml)](https://github.com/zydtiger/yoclaw/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-AGPL%20v3-green)](LICENSE)
 
 Yoclaw is a Telegram-first LLM agent written in Rust. It talks to OpenAI-compatible chat and embedding APIs, supports tool calling, keeps a persistent task queue, and stores semantic memories in SQLite with `sqlite-vec`.

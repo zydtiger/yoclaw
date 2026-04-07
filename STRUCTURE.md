@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document details all coroutines spawned using `tokio::spawn`, their main actors, owned resources, and inter-corsosnt communication patterns.
+This document details all coroutines spawned using `tokio::spawn`, their main actors, owned resources, and inter-coroutine communication patterns.
 
 **Architecture Version:** 2.2 (Agent in Main Thread - split channel send/receive coroutines)
 
@@ -32,7 +32,7 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 | Resource          | Type                       | Ownership                              |
 | ----------------- | -------------------------- | -------------------------------------- |
 | `TelegramChannel` | `Arc<dyn Channel>`         | **Shared** (listener + sender)         |
-| `task_routes`     | `Arc<Mutex<HashMap<...>>>` | **Shared** (listener + sender)         |
+| `TaskRouter`      | `Arc<TaskRouter>`          | **Shared** (listener + sender + tasks) |
 | `TaskManager`     | `Arc<TaskManager>`         | **Shared** (with Agent for tool calls) |
 | `shutdown_signal` | `watch::Receiver<bool>`    | **Shared**                             |
 
@@ -41,7 +41,7 @@ This document details all coroutines spawned using `tokio::spawn`, their main ac
 | Direction    | Channel Type                | Purpose                           |
 | ------------ | --------------------------- | --------------------------------- |
 | **Incoming** | Telegram API (HTTP polling) | Polls `/getUpdates` via long poll |
-| **Outgoing** | `TaskManager`               | Schedules user messages as tasks  |
+| **Outgoing** | `TaskManager`               | Schedules user messages through the shared routing-aware scheduler |
 
 ### Loop Structure
 
@@ -52,8 +52,14 @@ loop {
             match self.channel.receive_messages().await {
                 Ok(messages) => {
                     for msg in messages {
-                        task_manager.schedule_task(msg.text).await;
-                        self.task_routes.lock().await.insert(task_id, msg.chat_id.clone());
+                        task_manager
+                            .schedule_task(
+                                msg.text,
+                                None,
+                                None,
+                                TaskRouteBinding::ChatId(msg.chat_id.clone()),
+                            )
+                            .await;
                     }
                 }
             }
@@ -76,14 +82,14 @@ loop {
 
 ### Main Actor
 
-- **Telegram Sender** - A coroutine that drains `channel_rx` and forwards responses to Telegram without being blocked by long polling
+- **Telegram Sender** - A coroutine that drains `channel_rx`, resolves `task_id -> chat_id` through `TaskRouter`, and forwards responses without being blocked by long polling
 
 ### Resources Owned
 
 | Resource          | Type                              | Ownership                      |
 | ----------------- | --------------------------------- | ------------------------------ |
 | `TelegramChannel` | `Arc<dyn Channel>`                | **Shared** (listener + sender) |
-| `task_routes`     | `Arc<Mutex<HashMap<...>>>`        | **Shared** (listener + sender) |
+| `TaskRouter`      | `Arc<TaskRouter>`                 | **Shared** (listener + sender + tasks) |
 | `channel_rx`      | `mpsc::Receiver<ChannelResponse>` | **Exclusive**                  |
 
 ### Loop Structure
@@ -96,7 +102,7 @@ loop {
     }
 }
 
-self.save_routes().await;
+self.task_router.save().await;
 ```
 
 **Lifecycle:** Runs until all `channel_tx` senders are dropped, then saves routes and exits
@@ -118,7 +124,8 @@ self.save_routes().await;
 | `TaskProcessor`   | `TaskProcessor` (owned)       | **Exclusive** - owns `BinaryHeap<Task>` and `mpsc::Receiver` |
 | `task_rx`         | `mpsc::Receiver<TaskCommand>` | **Exclusive** (receives schedule/cancel/list commands)       |
 | `pending_tasks`   | `BinaryHeap<Task>`            | **Exclusive** (priority queue ordered by deadline)           |
-| `shutdown_signal` | `Arc<Notify>`                 | **Shared** (listens for shutdown from Telegram coroutine)    |
+| `TaskRouter`      | `Arc<TaskRouter>`             | **Shared** (used for recurring-task route inheritance)       |
+| `shutdown_signal` | `watch::Receiver<bool>`       | **Shared** (listens for shutdown from main)                  |
 
 **Note:** The TaskProcessor runs in a **separate coroutine** to allow the Agent (in main thread) to use tools like `schedule_task` without deadlock.
 
@@ -149,13 +156,17 @@ loop {
             while let Some(task) = self.pending_tasks.peek() {
                 if task.is_ready() {
                     let task = self.pending_tasks.pop().unwrap();
+                    if let Some(next_task) = task.next_recurrence() {
+                        self.task_router.copy(&task.id, next_task.id).await;
+                        self.pending_tasks.push(next_task);
+                    }
                     agent_tx.send(task).await;
                 }
             }
         }
 
         // Branch 3: Shutdown signal
-        _ = shutdown_signal.notified() => {
+        _ = shutdown_signal.changed() => {
             self.save_tasks().await;
             break;
         }
@@ -208,7 +219,7 @@ sequenceDiagram
     rect rgb(31, 90, 88)
         Note over P1, External: User task flow
         External->>P3: User message
-        P3->>P2: Schedule immediate task (via TaskManager)
+        P3->>P2: Schedule task with `ChatId` binding (via TaskManager)
         P2->>P1: Dispatch task (via agent_tx)
         P1->>P1: Execute task (Agent.send_message)
         P1->>P4: Send response (via channel_tx)
@@ -217,6 +228,7 @@ sequenceDiagram
 
     rect rgb(41, 101, 50)
         Note over P1, External: Scheduled task flow
+        P1->>P2: `schedule_task` tool call with `Inherit(task_id)`
         P2->>P2: Deadline reached
         P2->>P1: Dispatch task (via agent_tx)
         P1->>P1: Execute task
@@ -247,7 +259,7 @@ sequenceDiagram
 | --------------------- | ----------------------- | ---- | ------------------ | ----------------------- | ------------------------------ |
 | **Outgoing Messages** | `mpsc::ChannelResponse` | 16   | Agent (main)       | Telegram Sender         | Send AI responses to Telegram  |
 | **Task Execution**    | `mpsc::Task`            | 32   | TaskProcessor      | Agent (main)            | Queue tasks for AI processing  |
-| **Task Command**      | `mpsc::TaskCommand`     | 100  | TaskManager (Arc)  | TaskProcessor           | Schedule/cancel/list tasks     |
+| **Task Command**      | `mpsc::TaskCommand`     | 100  | TaskManager (Arc)  | TaskProcessor           | Unified schedule/cancel/list path |
 | **Task Control**      | `oneshot::Result`       | 1    | TaskProcessor      | TaskManager             | Async response for cancel/list |
 | **Shutdown Signal**   | `watch::bool`           | 1    | Shutdown Coroutine | TaskProcessor, Listener | Graceful shutdown coordination |
 
@@ -259,12 +271,12 @@ sequenceDiagram
 | ------------------------------------------------ | ------------------- | ------------------------- | ----------------------------------------------------------- |
 | **TelegramChannel**                              | Channel Handler     | Listener, Sender          | `Arc<dyn Channel>` - concurrent read-only access            |
 | **Agent (messages, tools)**                      | Main Thread (Agent) | None                      | Exclusive ownership - single owner prevents race conditions |
-| **TaskManager**                                  | Main (Arc)          | Telegram Coroutine, Agent | `Arc<TaskManager>` - concurrent access via channel          |
+| **TaskManager**                                  | Main (Arc)          | Telegram Coroutine, Agent | `Arc<TaskManager>` - single scheduling entrypoint           |
 | **mpsc::Sender<ChannelResponse> (channel_tx)**   | Main Thread (Agent) | None                      | Exclusive ownership                                         |
 | **mpsc::Receiver<ChannelResponse> (channel_rx)** | Telegram Sender     | None                      | Exclusive ownership                                         |
 | **mpsc::Receiver<Task> (agent_rx)**              | Main Thread (Agent) | None                      | Exclusive ownership                                         |
 | **BinaryHeap<Task>**                             | TaskProcessor       | None                      | Exclusive ownership - task queue                            |
-| **task_routes**                                  | Channel Handler     | Listener, Sender          | `Arc<Mutex<HashMap<TaskId, String>>>`                       |
+| **TaskRouter**                                   | Task Subsystem      | Listener, Sender, TaskProcessor, TaskManager | `Arc<TaskRouter>` for route lookup, persistence, and copy |
 | **shutdown_signal (watch::Receiver<bool>)**      | Shutdown Coroutine  | TaskProcessor, Listener   | `watch` broadcast, cloned per coroutine                     |
 
 ---
@@ -280,7 +292,7 @@ sequenceDiagram
 
 - Telegram polling and Telegram sending run in **separate coroutines**
 - Long polling on `getUpdates` no longer blocks outgoing replies
-- Shared routing state is synchronized through `Arc<Mutex<...>>`
+- Shared routing state is centralized in `TaskRouter`
 
 ### 3. **TaskProcessor in Separate Coroutine (Deadlock Prevention)**
 
@@ -307,7 +319,7 @@ sequenceDiagram
 
 2. **Deadlock-Free Design**: The separate TaskProcessor coroutine prevents deadlocks when Agent tools call back to TaskManager. This is a critical design decision.
 
-3. **Simplified Telegram Handling**: Merging polling and sending into one coroutine reduces complexity and eliminates one hop in the message chain.
+3. **Route-Aware Scheduling**: `TaskManager::schedule_task(...)` is the single scheduling entrypoint. It resolves route bindings through `TaskRouter` before enqueueing work, so delayed and repeating tasks remain deliverable.
 
 4. **Task Ordering**: Tasks are processed by deadline priority using `BinaryHeap`, ensuring time-sensitive tasks are handled first.
 
@@ -326,15 +338,15 @@ sequenceDiagram
 
 ### Shutdown Signal Flow
 
-The application implements graceful shutdown using `Arc<Notify>` to coordinate between coroutines:
+The application implements graceful shutdown using `watch::bool` to coordinate between coroutines:
 
 ```
 1. User sends SIGTERM (Ctrl+C) → tokio::signal::ctrl_c() triggers in Shutdown Coroutine
-2. Shutdown Coroutine calls shutdown_clone.notify_waiters()
-3. TaskProcessor receives shutdown signal via shutdown_signal.notified()
-4. Channel Handler receives shutdown signal via shutdown_signal.notified()
+2. Shutdown Coroutine broadcasts `true` through `watch::Sender<bool>`
+3. TaskProcessor receives shutdown signal via `shutdown_signal.changed()`
+4. Channel Handler listener receives shutdown signal via `shutdown_signal.changed()`
 5. TaskProcessor saves pending tasks to tasks.json
-6. Channel Handler saves routing table to routes.json
+6. Channel Sender drains remaining responses and `TaskRouter` saves routes.json
 7. Application loops exit, process stops cleanly
 ```
 
@@ -342,21 +354,21 @@ The application implements graceful shutdown using `Arc<Notify>` to coordinate b
 
 **In `src/main.rs`:**
 
-- Creates `shutdown_signal = Arc::new(Notify::new())`
+- Creates `let (shutdown_tx, shutdown_rx) = watch::channel(false)`
 - Spawns a dedicated coroutine to listen for `tokio::signal::ctrl_c()` (lines 51-58)
-- On signal: logs message and calls `shutdown_clone.notify_waiters()`
-- Passes `shutdown_signal.clone()` to both `task_processor.run()` and `channel_handler.start_listening()`
+- On signal: logs message and sends `true` through `shutdown_tx`
+- Passes cloned `shutdown_rx` to both `task_processor.run()` and `channel_handler.start_listening()`
 
 **In `TaskProcessor::run()` and `ChannelHandler::start_listening()`:**
 
-- Both loop mechanisms use `shutdown_signal.notified()` inside `tokio::select!`
+- Both loop mechanisms use `shutdown_signal.changed()` inside `tokio::select!`
 - On shutdown trigger: state is persisted as JSON to the configuration directory before exiting the loop
 
 ### Shutdown Triggers
 
 | Trigger          | Source             | Handler                      | Action              |
 | ---------------- | ------------------ | ---------------------------- | ------------------- |
-| SIGTERM / Ctrl+C | Shutdown Coroutine | `tokio::signal::ctrl_c()`    | Broadcast `Notify`  |
+| SIGTERM / Ctrl+C | Shutdown Coroutine | `tokio::signal::ctrl_c()`    | Broadcast `watch`   |
 | Channel closed   | Respective Loop    | `tokio::select!` else branch | Save state and exit |
 
 ---

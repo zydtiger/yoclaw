@@ -137,19 +137,17 @@ impl Agent {
                     };
 
                     for tool_call in tool_calls {
-                        // Tool-call progress is noisy for normal runs, so only surface it in debug mode.
-                        if self.debug_mode {
-                            let progress_msg = ChannelResponse {
-                                task_id,
-                                payload: format!(
-                                    "🔧 Calling `{}` with args:\n```json\n{}\n```",
-                                    tool_call.function.name, tool_call.function.arguments
-                                ),
-                                status: ResponseStatus::Continue,
-                            };
-                            if let Err(e) = self.channel_tx.send(progress_msg).await {
-                                log::error!("Failed to send updates: {}", e);
-                            }
+                        let progress_msg = ChannelResponse {
+                            task_id,
+                            payload: format_tool_call_progress(
+                                &tool_call.function.name,
+                                &tool_call.function.arguments,
+                                self.debug_mode,
+                            ),
+                            status: ResponseStatus::Continue,
+                        };
+                        if let Err(e) = self.channel_tx.send(progress_msg).await {
+                            log::error!("Failed to send updates: {}", e);
                         }
 
                         log::info!("Calling tool: {}", tool_call.function.name);
@@ -203,9 +201,23 @@ impl Agent {
     }
 }
 
+fn format_tool_call_progress(name: &str, arguments: &Value, debug_mode: bool) -> String {
+    if debug_mode {
+        format!(
+            "Calling tool `{}`\n```json\n{}\n```",
+            name,
+            serde_json::to_string_pretty(arguments)
+                .unwrap_or_else(|_| arguments.to_string())
+        )
+    } else {
+        format!("Calling tool `{}`", name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     impl Agent {
         pub(crate) fn new_for_tests(system_prompt: &str, context_size: u32) -> Self {
@@ -393,5 +405,21 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].role, Role::System);
         assert_eq!(history.total_tokens, 0);
+    }
+
+    #[test]
+    fn tool_progress_message_hides_arguments_in_normal_mode() {
+        let payload = format_tool_call_progress("schedule_task", &json!({"delay_seconds": 60}), false);
+
+        assert_eq!(payload, "Calling tool `schedule_task`");
+    }
+
+    #[test]
+    fn tool_progress_message_includes_arguments_in_debug_mode() {
+        let payload = format_tool_call_progress("schedule_task", &json!({"delay_seconds": 60}), true);
+
+        assert!(payload.starts_with("Calling tool `schedule_task`\n```json\n"));
+        assert!(payload.contains("\"delay_seconds\": 60"));
+        assert!(payload.ends_with("\n```"));
     }
 }

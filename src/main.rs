@@ -57,7 +57,7 @@ async fn run_runtime() -> Result<(), Box<dyn std::error::Error>> {
         channel,
         config.channels.allowed_users.clone(),
         config.channels.recv_confirm.clone(),
-        task_router,
+        task_router.clone(),
     );
     let (channel_tx, channel_rx) = mpsc::channel::<ChannelResponse>(16);
 
@@ -129,7 +129,10 @@ async fn run_runtime() -> Result<(), Box<dyn std::error::Error>> {
             let cmd = parts[0];
             log::info!("Received command: {}", cmd);
 
-            match command_manager.execute(cmd, &mut agent) {
+            match command_manager
+                .execute(cmd, task.id, &mut agent, task_manager.as_ref(), task_router.as_ref())
+                .await
+            {
                 Some(response_text) => response_text,
                 None => "Unknown command. Try /help.".to_string(),
             }

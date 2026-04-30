@@ -184,7 +184,6 @@ impl Agent {
 
                     if self.debug_mode {
                         let debug_info = json!({
-                            "timings": response.timings,
                             "usage": response.usage
                         });
                         let formatted =

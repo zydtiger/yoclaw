@@ -20,8 +20,6 @@ pub struct Response {
     pub id: String,
     pub model: String,
     pub object: String,
-    pub system_fingerprint: String,
-    pub timings: GenerationMetrics,
     pub usage: UsageMetrics,
 }
 
@@ -30,19 +28,6 @@ pub struct Choice {
     pub finish_reason: FinishReason,
     pub index: i32,
     pub message: Message,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct GenerationMetrics {
-    pub cache_n: i32,
-    pub predicted_ms: f32,
-    pub predicted_n: i32,
-    pub predicted_per_second: f32,
-    pub predicted_per_token_ms: f32,
-    pub prompt_ms: f32,
-    pub prompt_n: i32,
-    pub prompt_per_second: f32,
-    pub prompt_per_token_ms: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

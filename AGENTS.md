@@ -41,6 +41,9 @@
 - `list_tasks` output now implicitly includes repeat metadata because it serializes the full `Task`.
 
 ## Practical Editing Notes
+- Commit hooks are defined in `.pre-commit-config.yaml` and run with `prek`.
+  Install the runner once with `uv tool install prek`, then activate the hooks
+  in this checkout with `prek install`.
 - If you change shutdown, preserve the invariant that route saving happens after the sender is done mutating `task_routes`.
 - If you change task scheduling, preserve backward compatibility for persisted tasks by keeping `repeat` optional on deserialize.
 - If you update architecture docs, `STRUCTURE.md` is the verbose source of truth; keep this file concise.

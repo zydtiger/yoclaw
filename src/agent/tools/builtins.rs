@@ -44,7 +44,7 @@ pub async fn generic_shell(
         let mut result = stdout.trim().to_string();
         if !stderr.is_empty() {
             if !result.is_empty() {
-                result.push_str("\n");
+                result.push('\n');
             }
             result.push_str(&format!("(stderr: {})", stderr.trim()));
         }

@@ -358,7 +358,7 @@ fn expand_home_shortcut(source: &str) -> PathBuf {
                     .map(|home| home.join(rest))
                     .unwrap_or_else(|| PathBuf::from(source))
             } else {
-                return PathBuf::from(source);
+                PathBuf::from(source)
             }
         }
     }
@@ -551,7 +551,11 @@ mod tests {
 
     use super::{expand_install_source_path, install_skill, SkillInstallError};
 
-    static TEST_LOCK: LazyLock<std::sync::Mutex<()>> = LazyLock::new(|| std::sync::Mutex::new(()));
+    // `tokio::sync::Mutex` rather than `std::sync::Mutex`: the guard is held across `.await`
+    // points below to serialize whole async test bodies, which an async-aware mutex supports
+    // without risking a blocked executor thread.
+    static TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
     static TEST_CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
     struct TestDir {
@@ -575,7 +579,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn installs_valid_directory_skill() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         let config_dir = reset_test_config_dir().await;
         let source_dir = TestDir::new("source");
         write_skill_dir(
@@ -600,7 +604,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn installs_valid_zip_skill() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         let config_dir = reset_test_config_dir().await;
         let zip_dir = TestDir::new("zip");
         let zip_path = zip_dir.path.join("skill.zip");
@@ -627,7 +631,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn accepts_zip_with_single_wrapper_directory() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         reset_test_config_dir().await;
         let zip_dir = TestDir::new("zip");
         let zip_path = zip_dir.path.join("wrapped.zip");
@@ -648,7 +652,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn rejects_skill_directory_without_skill_md() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         reset_test_config_dir().await;
         let source_dir = TestDir::new("source");
 
@@ -663,7 +667,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn rejects_zip_with_multiple_candidate_roots() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         reset_test_config_dir().await;
         let zip_dir = TestDir::new("zip");
         let zip_path = zip_dir.path.join("bad.zip");
@@ -684,7 +688,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn rejects_duplicate_skill_name() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         reset_test_config_dir().await;
         let first_source = TestDir::new("source");
         let second_source = TestDir::new("source");
@@ -720,7 +724,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn rejects_existing_destination_directory() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().await;
         let config_dir = reset_test_config_dir().await;
         let skills_dir = config_dir.join("skills");
         std::fs::create_dir_all(skills_dir.join("existing-skill"))
@@ -755,7 +759,7 @@ mod tests {
 
     #[test]
     fn expands_home_shortcuts_for_install_paths() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.blocking_lock();
         let home_dir = TestDir::new("home");
         let previous_home = std::env::var_os("HOME");
         std::env::set_var("HOME", &home_dir.path);
@@ -768,7 +772,7 @@ mod tests {
 
     #[test]
     fn expands_env_vars_for_install_paths() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.blocking_lock();
         let source_dir = TestDir::new("env-root");
         let previous_root = std::env::var_os("YOCLAW_SKILL_TEST_ROOT");
         std::env::set_var("YOCLAW_SKILL_TEST_ROOT", &source_dir.path);

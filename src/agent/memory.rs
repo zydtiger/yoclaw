@@ -5,11 +5,22 @@ impl MemoryStore {
     /// Creates a new MemoryStore connected to the given database name.
     /// If an empty string or ":memory:" is provided, it creates an in-memory database.
     pub fn new(db_name: &str) -> Result<Self> {
-        // Register the sqlite-vec extension for future connections
+        // Register the sqlite-vec extension for future connections.
+        // SAFETY: `sqlite_vec::sqlite3_vec_init` is declared upstream with a placeholder
+        // zero-argument signature solely to obtain a linkable symbol address. The actual C
+        // function (see sqlite-vec.c) implements the standard SQLite extension entry-point
+        // signature `int(sqlite3*, char**, const sqlite3_api_routines*)`, which is exactly the
+        // type recovered below and the type `sqlite3_auto_extension` expects.
         unsafe {
-            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
-                sqlite_vec::sqlite3_vec_init as *const (),
-            )));
+            let entry_point = std::mem::transmute::<
+                *const (),
+                unsafe extern "C" fn(
+                    *mut rusqlite::ffi::sqlite3,
+                    *mut *mut std::os::raw::c_char,
+                    *const rusqlite::ffi::sqlite3_api_routines,
+                ) -> std::os::raw::c_int,
+            >(sqlite_vec::sqlite3_vec_init as *const ());
+            rusqlite::ffi::sqlite3_auto_extension(Some(entry_point));
         }
 
         let conn = if db_name.is_empty() || db_name == ":memory:" {

@@ -127,11 +127,8 @@ impl ChannelHandler {
     }
 
     pub async fn start_sending(self, mut channel_rx: tokio::sync::mpsc::Receiver<ChannelResponse>) {
-        loop {
-            match channel_rx.recv().await {
-                Some(response) => self.forward_response(response).await,
-                None => break,
-            }
+        while let Some(response) = channel_rx.recv().await {
+            self.forward_response(response).await;
         }
 
         if let Err(e) = self.task_router.save().await {

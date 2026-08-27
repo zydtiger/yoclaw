@@ -169,17 +169,16 @@ impl TaskProcessor {
 
     /// Save tasks to a JSON file
     pub async fn save_tasks(tasks: &[Task]) -> Result<(), TaskSaveError> {
-        let json =
-            serde_json::to_string_pretty(tasks).map_err(|e| TaskSaveError::InvalidFormat(e))?;
+        let json = serde_json::to_string_pretty(tasks).map_err(TaskSaveError::InvalidFormat)?;
 
         let file_path = Self::get_tasks_path();
         let mut file = File::create(file_path)
             .await
-            .map_err(|e| TaskSaveError::FsError(e))?;
+            .map_err(TaskSaveError::FsError)?;
 
         file.write_all(json.as_bytes())
             .await
-            .map_err(|e| TaskSaveError::FsError(e))?;
+            .map_err(TaskSaveError::FsError)?;
 
         log::info!("Saved {} task(s) to tasks.json", tasks.len());
         Ok(())
@@ -195,10 +194,10 @@ impl TaskProcessor {
 
         let content = tokio::fs::read_to_string(file_path)
             .await
-            .map_err(|e| TaskSaveError::FsError(e))?;
+            .map_err(TaskSaveError::FsError)?;
 
         let tasks: Vec<Task> =
-            serde_json::from_str(&content).map_err(|e| TaskSaveError::InvalidFormat(e))?;
+            serde_json::from_str(&content).map_err(TaskSaveError::InvalidFormat)?;
 
         log::info!("Loaded {} task(s) from tasks.json", tasks.len());
         Ok(tasks)

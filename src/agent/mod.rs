@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 
 use crate::channels::ChannelResponse;
 
-mod agent;
+mod core;
 mod embedding;
 mod memory;
 mod message;

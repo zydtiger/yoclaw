@@ -86,9 +86,9 @@ impl Agent {
         let result = response.json::<Value>().await.map_err(|e| e.to_string())?;
 
         match result.get("error") {
-            Some(e) => return Err(e.to_string()),
+            Some(e) => Err(e.to_string()),
             None => match serde_json::from_value::<Response>(result) {
-                Err(e) => return Err(e.to_string()),
+                Err(e) => Err(e.to_string()),
                 Ok(res) => Ok(res),
             },
         }
@@ -188,7 +188,7 @@ impl Agent {
                         });
                         let formatted =
                             serde_json::to_string_pretty(&debug_info).unwrap_or_else(|_e| {
-                                format!("{{\"error\":\"Failed to format debug info\"}}")
+                                "{\"error\":\"Failed to format debug info\"}".to_string()
                             });
                         return format!("{}\n\n{}", content, formatted);
                     }

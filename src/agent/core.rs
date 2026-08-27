@@ -77,7 +77,7 @@ impl Agent {
         let response = self
             .client
             .post(self.api_url.clone())
-            .header("Authorization", format!("Bearer {}", &self.api_key))
+            .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&payload)
             .send()
             .await

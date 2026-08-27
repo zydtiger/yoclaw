@@ -83,7 +83,7 @@ impl MemoryStore {
 
         let mut stmt = self.conn.prepare(
             r#"
-            SELECT 
+            SELECT
                 memories.id,
                 memories.text,
                 (1.0 - vec_distance_cosine(memories_vec.embedding, ?1)) AS similarity

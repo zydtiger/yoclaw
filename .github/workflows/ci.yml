@@ -5,10 +5,19 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -17,21 +26,34 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          enable-cache: false
-          version: "0.12.5"
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Run commit hooks
-        run: uvx prek@0.4.14 run --all-files
+        uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+        with:
+          prek-version: "0.4.x"
+
+      - name: Run push-stage hooks
+        uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+        with:
+          prek-version: "0.4.x"
+          extra-args: --all-files --hook-stage pre-push
 
       - name: Run tests
         run: cargo test --locked
+
+      - name: Release build
+        run: cargo build --release
+
+      # The CLI declares no `version` in its clap command, so `--help` is the
+      # smoke check. Reuse the release artifacts rather than letting cargo
+      # install compile again in its own target dir.
+      - name: Install smoke test
+        run: |
+          cargo install --path . --root "$RUNNER_TEMP/yoclaw" --locked --target-dir target
+          "$RUNNER_TEMP/yoclaw/bin/yoclaw" --help

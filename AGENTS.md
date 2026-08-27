@@ -44,6 +44,11 @@
 - Commit hooks are defined in `.pre-commit-config.yaml` and run with `prek`.
   Install the runner once with `uv tool install prek`, then activate the hooks
   in this checkout with `prek install`.
+- `.github/workflows/ci.yml` runs that same configuration rather than restating
+  its commands, so the checks have one definition and cannot drift apart. Apply
+  them outside a commit with `prek run --all-files` and
+  `prek run --all-files --hook-stage pre-push`; `cargo clippy` runs at the push
+  stage because it compiles the crate.
 - If you change shutdown, preserve the invariant that route saving happens after the sender is done mutating `task_routes`.
 - If you change task scheduling, preserve backward compatibility for persisted tasks by keeping `repeat` optional on deserialize.
 - If you update architecture docs, `STRUCTURE.md` is the verbose source of truth; keep this file concise.

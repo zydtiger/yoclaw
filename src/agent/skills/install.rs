@@ -545,7 +545,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{LazyLock, OnceLock};
 
-    use zip::write::FileOptions;
+    use zip::write::SimpleFileOptions as FileOptions;
 
     use crate::cli::SkillSource;
 
